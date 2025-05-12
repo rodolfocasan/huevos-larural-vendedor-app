@@ -23,11 +23,53 @@ export default function App() {
   // Estado para el precio por cartón de huevos, con un valor predeterminado de $4.00
   const [eggsPrice, setEggsPrice] = useState(4);
 
-  // Efecto para cargar el precio de los cartones y las ventas al iniciar la aplicación
+  // Estado para la lista de ubicaciones de venta
+  const [locations, setLocations] = useState(['Bodega']);
+
+  // Estado para la ubicación de venta seleccionada actualmente
+  const [currentLocation, setCurrentLocation] = useState('Bodega');
+
+  // Efecto para cargar el precio de los cartones, las ventas y la ubicación de venta al iniciar la aplicación
   useEffect(() => {
     loadEggsPrice();
     loadSales();
+    loadLocations();
   }, []);
+
+  // Función asíncrona para cargar las ubicaciones de venta desde AsyncStorage
+  const loadLocations = async () => {
+    try {
+      const storedLocations = await AsyncStorage.getItem('@locations');
+      if (storedLocations !== null) {
+        const parsedLocations = JSON.parse(storedLocations);
+        setLocations(parsedLocations);
+        // Establecer la primera ubicación como predeterminada si existe
+        if (parsedLocations.length > 0) {
+          setCurrentLocation(parsedLocations[0]);
+        }
+      }
+    } catch (e) {
+      console.error('No se pudo cargar las ubicaciones:', e);
+    }
+  };
+
+  // Función asíncrona para guardar las ubicaciones en AsyncStorage
+  const saveLocations = async (newLocations) => {
+    try {
+      await AsyncStorage.setItem('@locations', JSON.stringify(newLocations));
+      setLocations(newLocations);
+    } catch (e) {
+      console.error('No se pudo guardar las ubicaciones:', e);
+    }
+  };
+
+  // Función para añadir una nueva ubicación
+  const addLocation = (newLocation) => {
+    if (newLocation && !locations.includes(newLocation)) {
+      const updatedLocations = [...locations, newLocation];
+      saveLocations(updatedLocations);
+    }
+  };
 
   // Función asíncrona para cargar el precio de los cartones desde AsyncStorage
   const loadEggsPrice = async () => {
@@ -144,6 +186,10 @@ export default function App() {
         sale={currentSale}
         updateSale={updateSale}
         eggsPrice={eggsPrice}
+        locations={locations}
+        currentLocation={currentLocation}
+        setCurrentLocation={setCurrentLocation}
+        addLocation={addLocation}
       />
     </SafeAreaView>
   );

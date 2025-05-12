@@ -12,12 +12,14 @@ import TransactionsList from './TransactionsList';
 
 
 // Componente para manejar la interfaz de ventas, historial y gastos
-const SalesContainer = ({ sale, updateSale, eggsPrice }) => {
+const SalesContainer = ({ sale, updateSale, eggsPrice, locations, currentLocation, setCurrentLocation, addLocation }) => {
     const [activeTab, setActiveTab] = useState('sales'); // Estado para la pestaña activa: 'sales', 'history', 'expenses'
     const [expenseModalVisible, setExpenseModalVisible] = useState(false); // Estado para la visibilidad del modal de gastos
     const [expenseAmount, setExpenseAmount] = useState(''); // Estado para el monto del gasto
     const [expenseDescription, setExpenseDescription] = useState('Gasolina'); // Estado para la descripción del gasto
     const [showFunds, setShowFunds] = useState(false); // Estado para mostrar u ocultar los fondos
+    const [newLocationModalVisible, setNewLocationModalVisible] = useState(false); // Estado para el modal de nueva ubicación
+    const [newLocationName, setNewLocationName] = useState(''); // Estado para el nombre de la nueva ubicación
 
     // Verificación si la venta está cargada
     if (!sale) {
@@ -69,6 +71,7 @@ const SalesContainer = ({ sale, updateSale, eggsPrice }) => {
                 ...transaction,
                 id: Date.now().toString(),
                 timestamp: new Date().toISOString(),
+                location: currentLocation, // Añadir la ubicación actual a la transacción
             }],
         };
         updateSale(updatedSale);
@@ -171,6 +174,92 @@ const SalesContainer = ({ sale, updateSale, eggsPrice }) => {
         </Modal>
     );
 
+    // Renderizado del modal para añadir o seleccionar ubicación
+    const renderLocationModal = () => (
+        <Modal
+            animationType="slide"
+            transparent={true}
+            visible={newLocationModalVisible}
+            onRequestClose={() => setNewLocationModalVisible(false)}
+        >
+            <TouchableOpacity
+                style={styles.modalOverlay}
+                activeOpacity={1}
+                onPress={() => setNewLocationModalVisible(false)}
+            >
+                <View style={styles.modalContent}>
+                    <Text style={styles.modalTitle}>Ubicación de Venta</Text>
+
+                    {/* Lista de ubicaciones existentes */}
+                    <ScrollView style={styles.locationsList}>
+                        {locations.map((location, index) => (
+                            <TouchableOpacity
+                                key={index}
+                                style={[
+                                    styles.locationItem,
+                                    currentLocation === location && styles.selectedLocationItem,
+                                ]}
+                                onPress={() => {
+                                    setCurrentLocation(location);
+                                    setNewLocationModalVisible(false);
+                                }}
+                            >
+                                <Text
+                                    style={[
+                                        styles.locationItemText,
+                                        currentLocation === location && styles.selectedLocationItemText,
+                                    ]}
+                                >
+                                    {location}
+                                </Text>
+                            </TouchableOpacity>
+                        ))}
+                    </ScrollView>
+
+                    {/* Campo para añadir nueva ubicación */}
+                    <View style={styles.inputContainer}>
+                        <Text style={styles.inputLabel}>Añadir nueva:</Text>
+                        <TextInput
+                            style={styles.input}
+                            value={newLocationName}
+                            onChangeText={setNewLocationName}
+                            placeholder="Nombre de ubicación"
+                            placeholderTextColor={COLORS.textSecondary}
+                        />
+                    </View>
+
+                    <View style={styles.modalButtonsContainer}>
+                        <TouchableOpacity
+                            style={[styles.modalButton, styles.cancelButton]}
+                            onPress={() => setNewLocationModalVisible(false)}
+                        >
+                            <Text style={styles.modalButtonText}>Cancelar</Text>
+                        </TouchableOpacity>
+
+                        <TouchableOpacity
+                            style={[
+                                styles.modalButton,
+                                styles.addButton,
+                                !newLocationName && styles.disabledButton,
+                            ]}
+                            onPress={() => {
+                                if (newLocationName) {
+                                    addLocation(newLocationName);
+                                    setCurrentLocation(newLocationName);
+                                    setNewLocationName('');
+                                    setNewLocationModalVisible(false);
+                                }
+                            }}
+                            disabled={!newLocationName}
+                        >
+                            <Text style={styles.modalButtonText}>Añadir</Text>
+                        </TouchableOpacity>
+                    </View>
+                </View>
+            </TouchableOpacity>
+        </Modal>
+    );
+
     return (
         <View style={styles.container}>
             {/* Indicador de fondos totales */}
@@ -222,10 +311,40 @@ const SalesContainer = ({ sale, updateSale, eggsPrice }) => {
             {/* Contenido de la pestaña activa */}
             <View style={styles.tabContent}>
                 {activeTab === 'sales' && (
-                    <SaleCalculator
-                        onSaveTransaction={addTransaction}
-                        eggsPrice={eggsPrice}
-                    />
+                    <>
+                        <View style={styles.locationContainer}>
+                            <Text style={styles.locationLabel}>Ubicación de venta:</Text>
+                            <View style={styles.locationSelectorContainer}>
+                                <View style={styles.dropdownContainer}>
+                                    {locations.length > 0 ? (
+                                        <TouchableOpacity
+                                            style={styles.locationPicker}
+                                            onPress={() => setNewLocationModalVisible(true)}
+                                        >
+                                            <Text style={styles.locationPickerText}>{currentLocation}</Text>
+                                            <Text style={styles.dropdownIcon}>▼</Text>
+                                        </TouchableOpacity>
+                                    ) : (
+                                        <Text style={styles.noLocationsText}>No hay ubicaciones</Text>
+                                    )}
+                                </View>
+                                <TouchableOpacity
+                                    style={styles.addLocationButton}
+                                    onPress={() => {
+                                        setNewLocationName('');
+                                        setNewLocationModalVisible(true);
+                                    }}
+                                >
+                                    <Text style={styles.addLocationButtonText}>(+) Añadir ubicación</Text>
+                                </TouchableOpacity>
+                            </View>
+                        </View>
+                        <SaleCalculator
+                            onSaveTransaction={addTransaction}
+                            eggsPrice={eggsPrice}
+                            currentLocation={currentLocation}
+                        />
+                    </>
                 )}
 
                 {activeTab === 'history' && (
@@ -274,6 +393,7 @@ const SalesContainer = ({ sale, updateSale, eggsPrice }) => {
             </View>
 
             {renderExpenseModal()}
+            {renderLocationModal()}
         </View>
     );
 };
@@ -471,6 +591,75 @@ const styles = StyleSheet.create({
     },
     modalButtonText: {
         color: COLORS.text,
+        fontWeight: 'bold',
+    },
+    locationContainer: {
+        padding: 10,
+        backgroundColor: COLORS.card,
+        borderRadius: 8,
+        marginBottom: 10,
+    },
+    locationLabel: {
+        color: COLORS.text,
+        fontSize: 16,
+        fontWeight: 'bold',
+        marginBottom: 5,
+    },
+    locationSelectorContainer: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+    },
+    dropdownContainer: {
+        flex: 1,
+        marginRight: 8,
+    },
+    locationPicker: {
+        backgroundColor: COLORS.primary,
+        borderRadius: 4,
+        padding: 8,
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+    },
+    locationPickerText: {
+        color: COLORS.text,
+        fontSize: 14,
+    },
+    dropdownIcon: {
+        color: COLORS.text,
+        fontSize: 12,
+    },
+    noLocationsText: {
+        color: COLORS.textSecondary,
+        padding: 8,
+    },
+    addLocationButton: {
+        backgroundColor: COLORS.accent,
+        borderRadius: 4,
+        padding: 8,
+    },
+    addLocationButtonText: {
+        color: COLORS.text,
+        fontSize: 14,
+    },
+    locationsList: {
+        maxHeight: 150,
+        marginBottom: 10,
+    },
+    locationItem: {
+        padding: 10,
+        borderBottomWidth: 1,
+        borderBottomColor: COLORS.border,
+    },
+    selectedLocationItem: {
+        backgroundColor: COLORS.accent,
+    },
+    locationItemText: {
+        color: COLORS.text,
+        fontSize: 14,
+    },
+    selectedLocationItemText: {
         fontWeight: 'bold',
     },
 });
