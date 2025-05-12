@@ -68,6 +68,14 @@ const TransactionsList = ({ transactions }) => {
                                     ${transaction.change.toFixed(2)}
                                 </Text>
                             </View>
+
+                            {/* Añadir la ubicación de la venta */}
+                            <View style={styles.detailRow}>
+                                <Text style={styles.detailLabel}>Ubicación:</Text>
+                                <Text style={[styles.detailValue, styles.locationValue]}>
+                                    {transaction.location || 'No especificada'}
+                                </Text>
+                            </View>
                         </View>
 
                         <View style={styles.billsDetails}>
@@ -204,6 +212,10 @@ const styles = StyleSheet.create({
     totalValue: {
         color: COLORS.secondary,
         fontSize: 16,
+        fontWeight: 'bold',
+    },
+    locationValue: {
+        color: COLORS.accent,
         fontWeight: 'bold',
     },
 });

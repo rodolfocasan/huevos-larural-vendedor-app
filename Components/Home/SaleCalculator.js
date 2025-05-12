@@ -9,7 +9,7 @@ import { COLORS, BILLS } from '../Utils/Constants';
 
 
 // Componente para manejar la calculadora de ventas
-const SaleCalculator = ({ onSaveTransaction, eggsPrice }) => {
+const SaleCalculator = ({ onSaveTransaction, eggsPrice, currentLocation }) => {
     const [saleType, setSaleType] = useState('carton'); // Estado para el tipo de venta: 'Cartón', 'Medio Cartón' o 'Caja'
     const [ventaCompleta, setVentaCompleta] = useState(true); // Estado para controlar si es venta completa o dividida
     const [quantity, setQuantity] = useState(0); // Estado para la cantidad de unidades a vender
@@ -102,6 +102,7 @@ const SaleCalculator = ({ onSaveTransaction, eggsPrice }) => {
             receivedMoney,
             totalReceived,
             change,
+            location: currentLocation, // Añadir la ubicación a la transacción
         };
 
         onSaveTransaction(transaction);
