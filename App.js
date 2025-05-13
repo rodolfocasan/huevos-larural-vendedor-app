@@ -1,6 +1,6 @@
 // App.js
 import React, { useState, useEffect } from 'react';
-import { View, StatusBar, SafeAreaView, StyleSheet } from 'react-native';
+import { View, StatusBar, SafeAreaView, StyleSheet, Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { COLORS } from './Components/Utils/Constants';
@@ -172,31 +172,37 @@ export default function App() {
   const currentSale = sales.find(sale => sale.id === currentSaleId) || null;
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
       <StatusBar barStyle="light-content" backgroundColor={COLORS.primary} />
-      <Header
-        sales={sales}
-        currentSaleId={currentSaleId}
-        setCurrentSaleId={setCurrentSaleId}
-        createNewSale={createNewSale}
-        eggsPrice={eggsPrice}
-        saveEggsPrice={saveEggsPrice}
-      />
-      <SalesContainer
-        sale={currentSale}
-        updateSale={updateSale}
-        eggsPrice={eggsPrice}
-        locations={locations}
-        currentLocation={currentLocation}
-        setCurrentLocation={setCurrentLocation}
-        addLocation={addLocation}
-      />
+      <View style={styles.contentContainer}>
+        <Header
+          sales={sales}
+          currentSaleId={currentSaleId}
+          setCurrentSaleId={setCurrentSaleId}
+          createNewSale={createNewSale}
+          eggsPrice={eggsPrice}
+          saveEggsPrice={saveEggsPrice}
+        />
+        <SalesContainer
+          sale={currentSale}
+          updateSale={updateSale}
+          eggsPrice={eggsPrice}
+          locations={locations}
+          currentLocation={currentLocation}
+          setCurrentLocation={setCurrentLocation}
+          addLocation={addLocation}
+        />
+      </View>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
+    flex: 1,
+    backgroundColor: COLORS.primary,
+  },
+  contentContainer: {
     flex: 1,
     backgroundColor: COLORS.background,
   },

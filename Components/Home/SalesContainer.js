@@ -348,7 +348,7 @@ const SalesContainer = ({ sale, updateSale, eggsPrice, locations, currentLocatio
                 )}
 
                 {activeTab === 'history' && (
-                    <TransactionsList transactions={sale.transactions} />
+                    <TransactionsList transactions={sale.transactions} sale={sale} />
                 )}
 
                 {activeTab === 'expenses' && (

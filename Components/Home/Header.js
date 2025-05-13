@@ -1,6 +1,6 @@
 // Components/Home/Header.js
 import React, { useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Modal, TextInput, FlatList } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Modal, TextInput, FlatList, Platform, SafeAreaView } from 'react-native';
 
 import { COLORS } from '../Utils/Constants';
 
@@ -74,46 +74,48 @@ const Header = ({ sales, currentSaleId, setCurrentSaleId, createNewSale, eggsPri
                     onPress={() => setMenuVisible(false)}
                 >
                     {/* Contenido del modal */}
-                    <View style={styles.modalContent}>
-                        <Text style={styles.modalTitle}>Ventas</Text>
-                        {/* Lista de ventas disponibles */}
-                        <FlatList
-                            data={sales}
-                            keyExtractor={(item) => item.id}
-                            renderItem={({ item }) => (
-                                /* Elemento de la lista para cada venta */
-                                <TouchableOpacity
-                                    style={[
-                                        styles.saleItem,
-                                        currentSaleId === item.id && styles.selectedSaleItem,
-                                    ]}
-                                    onPress={() => {
-                                        setCurrentSaleId(item.id);
-                                        setMenuVisible(false);
-                                    }}
-                                >
-                                    <Text
+                    <SafeAreaView style={styles.safeModalContainer}>
+                        <View style={styles.modalContent}>
+                            <Text style={styles.modalTitle}>Ventas</Text>
+                            {/* Lista de ventas disponibles */}
+                            <FlatList
+                                data={sales}
+                                keyExtractor={(item) => item.id}
+                                renderItem={({ item }) => (
+                                    /* Elemento de la lista para cada venta */
+                                    <TouchableOpacity
                                         style={[
-                                            styles.saleItemText,
-                                            currentSaleId === item.id && styles.selectedSaleItemText,
+                                            styles.saleItem,
+                                            currentSaleId === item.id && styles.selectedSaleItem,
                                         ]}
+                                        onPress={() => {
+                                            setCurrentSaleId(item.id);
+                                            setMenuVisible(false);
+                                        }}
                                     >
-                                        {item.name}
-                                    </Text>
-                                </TouchableOpacity>
-                            )}
-                        />
-                        {/* Botón para crear una nueva venta */}
-                        <TouchableOpacity
-                            style={styles.newSaleButton}
-                            onPress={() => {
-                                createNewSale();
-                                setMenuVisible(false);
-                            }}
-                        >
-                            <Text style={styles.newSaleButtonText}>(+) Nueva venta</Text>
-                        </TouchableOpacity>
-                    </View>
+                                        <Text
+                                            style={[
+                                                styles.saleItemText,
+                                                currentSaleId === item.id && styles.selectedSaleItemText,
+                                            ]}
+                                        >
+                                            {item.name}
+                                        </Text>
+                                    </TouchableOpacity>
+                                )}
+                            />
+                            {/* Botón para crear una nueva venta */}
+                            <TouchableOpacity
+                                style={styles.newSaleButton}
+                                onPress={() => {
+                                    createNewSale();
+                                    setMenuVisible(false);
+                                }}
+                            >
+                                <Text style={styles.newSaleButtonText}>(+) Nueva venta</Text>
+                            </TouchableOpacity>
+                        </View>
+                    </SafeAreaView>
                 </TouchableOpacity>
             </Modal>
 
@@ -131,37 +133,39 @@ const Header = ({ sales, currentSaleId, setCurrentSaleId, createNewSale, eggsPri
                     onPress={() => setSettingsVisible(false)}
                 >
                     {/* Contenido del modal de configuración */}
-                    <View style={styles.settingsModalContent}>
-                        <Text style={styles.modalTitle}>Configuración</Text>
+                    <SafeAreaView style={styles.safeModalContainer}>
+                        <View style={styles.settingsModalContent}>
+                            <Text style={styles.modalTitle}>Configuración</Text>
 
-                        {/* Campo para editar el precio por cartón */}
-                        <View style={styles.settingItem}>
-                            <Text style={styles.settingLabel}>Precio por cartón ($):</Text>
-                            <TextInput
-                                style={styles.priceInput}
-                                value={tempEggsPrice}
-                                onChangeText={setTempEggsPrice}
-                                keyboardType="numeric"
-                                placeholderTextColor={COLORS.textSecondary}
-                            />
+                            {/* Campo para editar el precio por cartón */}
+                            <View style={styles.settingItem}>
+                                <Text style={styles.settingLabel}>Precio por cartón ($):</Text>
+                                <TextInput
+                                    style={styles.priceInput}
+                                    value={tempEggsPrice}
+                                    onChangeText={setTempEggsPrice}
+                                    keyboardType="numeric"
+                                    placeholderTextColor={COLORS.textSecondary}
+                                />
+                            </View>
+
+                            {/* Campo calculado para el precio por caja */}
+                            <View style={styles.settingItem}>
+                                <Text style={styles.settingLabel}>Precio por caja ($):</Text>
+                                <Text style={styles.calculatedPrice}>
+                                    ${(parseFloat(tempEggsPrice) * 12).toFixed(2)}
+                                </Text>
+                            </View>
+
+                            {/* Botón para guardar los cambios */}
+                            <TouchableOpacity
+                                style={styles.saveButton}
+                                onPress={handleSavePrice}
+                            >
+                                <Text style={styles.saveButtonText}>Guardar</Text>
+                            </TouchableOpacity>
                         </View>
-
-                        {/* Campo calculado para el precio por caja */}
-                        <View style={styles.settingItem}>
-                            <Text style={styles.settingLabel}>Precio por caja ($):</Text>
-                            <Text style={styles.calculatedPrice}>
-                                ${(parseFloat(tempEggsPrice) * 12).toFixed(2)}
-                            </Text>
-                        </View>
-
-                        {/* Botón para guardar los cambios */}
-                        <TouchableOpacity
-                            style={styles.saveButton}
-                            onPress={handleSavePrice}
-                        >
-                            <Text style={styles.saveButtonText}>Guardar</Text>
-                        </TouchableOpacity>
-                    </View>
+                    </SafeAreaView>
                 </TouchableOpacity>
             </Modal>
         </View>
@@ -170,13 +174,15 @@ const Header = ({ sales, currentSaleId, setCurrentSaleId, createNewSale, eggsPri
 
 const styles = StyleSheet.create({
     header: {
-        backgroundColor: COLORS.background,
+        backgroundColor: COLORS.primary,
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
         paddingVertical: 15,
         paddingHorizontal: 20,
         elevation: 4,
+        // Asegurar que el header tenga una altura adecuada para evitar problemas con el notch
+        paddingTop: Platform.OS === 'ios' ? 10 : 15,
     },
     leftContainer: {
         flex: 0,
@@ -186,37 +192,41 @@ const styles = StyleSheet.create({
         flex: 1,
         alignItems: 'flex-end',
     },
-    // Botón para menú de ventas - igualando altura a settingsButton
     menuButton: {
         padding: 10,
         borderRadius: 25,
         backgroundColor: COLORS.accent,
         paddingHorizontal: 20,
-        height: 40,          // Altura fija igual que settingsButton
-        justifyContent: 'center', // Centrar verticalmente el texto
+        height: 40,
+        justifyContent: 'center',
     },
     currentSaleName: {
         color: COLORS.text,
         fontSize: 14,
         fontWeight: '800',
     },
-    // Botón de precio - igualando altura al menuButton
     settingsButton: {
         paddingHorizontal: 15,
         paddingVertical: 10,
-        borderRadius: 5,     // Se mantiene el borde diferente
+        borderRadius: 5,
         backgroundColor: COLORS.accent,
-        height: 40,          // Altura fija igual que menuButton
-        justifyContent: 'center', // Centrar verticalmente el texto
+        height: 40,
+        justifyContent: 'center',
     },
     settingsIcon: {
-        fontSize: 14,        // Mismo tamaño de fuente que currentSaleName
+        fontSize: 14,
         color: COLORS.text,
         fontWeight: 'bold',
     },
     modalOverlay: {
         flex: 1,
         backgroundColor: 'rgba(0, 0, 0, 0.5)',
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    safeModalContainer: {
+        flex: 1,
+        width: '100%',
         justifyContent: 'center',
         alignItems: 'center',
     },
