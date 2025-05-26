@@ -2,10 +2,11 @@
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Modal, TextInput, FlatList, Alert } from 'react-native';
 
-import { COLORS, formatTime, formatDate, BILLS, EXPENSE_TYPES } from '../Utils/Constants';
-
 import SaleCalculator from './SaleCalculator';
 import TransactionsList from './TransactionsList';
+import RouteManager from './RouteManager';
+
+import { COLORS, formatTime, formatDate, BILLS, EXPENSE_TYPES } from '../Utils/Constants';
 
 
 
@@ -38,11 +39,16 @@ const SalesContainer = ({ sale, updateSale, eggsPrice, locations, currentLocatio
         // Total de gastos
         const totalExpenses = sale.expenses.reduce((sum, expense) => sum + expense.amount, 0);
 
+        // Total de ventas de ruta (clientes entregados)
+        const totalRouteSales = (sale.clients || [])
+            .filter(client => client.status === 'delivered')
+            .reduce((sum, client) => sum + (client.quantity * eggsPrice * 12), 0);
+
         // Total de cambio dado (comentado, no borrar)
         // const totalChange = sale.transactions.reduce((sum, transaction) => sum + transaction.change, 0);
 
         // Fondo monetario total
-        return totalSales - totalExpenses;
+        return totalSales + totalRouteSales - totalExpenses;
     };
 
     // Función para mostrar el modal de confirmación mostrar los fondos
@@ -72,6 +78,7 @@ const SalesContainer = ({ sale, updateSale, eggsPrice, locations, currentLocatio
                 id: Date.now().toString(),
                 timestamp: new Date().toISOString(),
                 location: currentLocation, // Añadir la ubicación actual a la transacción
+                saleType: "Individual", // Añadir el tipo de venta
             }],
         };
         updateSale(updatedSale);
@@ -290,6 +297,15 @@ const SalesContainer = ({ sale, updateSale, eggsPrice, locations, currentLocatio
                 </TouchableOpacity>
 
                 <TouchableOpacity
+                    style={[styles.tab, activeTab === 'route' && styles.activeTab]}
+                    onPress={() => setActiveTab('route')}
+                >
+                    <Text style={[styles.tabText, activeTab === 'route' && styles.activeTabText]}>
+                        Ruta
+                    </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
                     style={[styles.tab, activeTab === 'expenses' && styles.activeTab]}
                     onPress={() => setActiveTab('expenses')}
                 >
@@ -345,6 +361,14 @@ const SalesContainer = ({ sale, updateSale, eggsPrice, locations, currentLocatio
                             currentLocation={currentLocation}
                         />
                     </>
+                )}
+
+                {activeTab === 'route' && (
+                    <RouteManager
+                        sale={sale}
+                        updateSale={updateSale}
+                        eggsPrice={eggsPrice}
+                    />
                 )}
 
                 {activeTab === 'history' && (

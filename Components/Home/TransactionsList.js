@@ -7,6 +7,10 @@ import * as Sharing from 'expo-sharing';
 
 import { COLORS, formatDate } from '../Utils/Constants';
 
+
+
+
+
 // Formateo de hora modificado para añadir ceros a la izquierda
 const formatTime = (date) => {
     const d = new Date(date);
@@ -21,10 +25,6 @@ const formatTime = (date) => {
 
     return `${formattedHours}:${minutes}:${seconds} ${ampm}`;
 };
-
-
-
-
 
 // Componente para mostrar la lista de transacciones
 const TransactionsList = ({ transactions, sale }) => {
@@ -278,6 +278,10 @@ const TransactionsList = ({ transactions, sale }) => {
                         <td>Ubicación:</td>
                         <td>${transaction.location || 'No especificada'}</td>
                     </tr>
+                    <tr>
+                        <td>Tipo de venta:</td>
+                        <td>${transaction.saleType || 'No especificado'}</td>
+                    </tr>
                 </table>
                 
                 <div class="bills-details">
@@ -514,6 +518,11 @@ const TransactionsList = ({ transactions, sale }) => {
                                 <Text style={[styles.detailValue, styles.locationValue]}>
                                     {transaction.location || 'No especificada'}
                                 </Text>
+                            </View>
+
+                            <View style={styles.detailRow}>
+                                <Text style={styles.detailLabel}>Tipo de venta:</Text>
+                                <Text style={styles.detailValue}>{transaction.saleType || 'No especificado'}</Text>
                             </View>
                         </View>
 
