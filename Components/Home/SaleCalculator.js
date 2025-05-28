@@ -1,6 +1,6 @@
 // Components/Home/SaleCalculator.js
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, Modal, TextInput } from 'react-native';
 
 import { COLORS, BILLS } from '../Utils/Constants';
 
@@ -18,6 +18,8 @@ const SaleCalculator = ({ onSaveTransaction, eggsPrice, currentLocation }) => {
     const [total, setTotal] = useState(0); // Estado para el total de la venta
     const [change, setChange] = useState(0); // Estado para el cambio a devolver
     const [totalReceived, setTotalReceived] = useState(0); // Estado para el total de dinero recibido
+    const [showCompositePayment, setShowCompositePayment] = useState(false); // Estado para el modal de pago compuesto
+    const [compositeAmount, setCompositeAmount] = useState(''); // Estado para el monto del pago compuesto
 
     // Si el usuario selecciona "Venta Dividida" y después vuelve a "Venta Completa", se necesita volver al estado correcto de saleType
     useEffect(() => {
@@ -77,6 +79,83 @@ const SaleCalculator = ({ onSaveTransaction, eggsPrice, currentLocation }) => {
         setTotal(0);
         setChange(0);
         setTotalReceived(0);
+        setShowCompositePayment(false);
+        setCompositeAmount('');
+    };
+
+    // Función para manejar el pago exacto
+    const handleExactPayment = () => {
+        setReceivedMoney({});
+        setTotalReceived(total);
+        setChange(0);
+
+        const transaction = {
+            type: saleType,
+            quantity,
+            unitPrice: saleType === 'carton'
+                ? eggsPrice
+                : saleType === 'half_carton'
+                    ? eggsPrice / 2
+                    : eggsPrice * 12,
+            total,
+            receivedMoney: { [total]: 1 }, // Marcar como pago exacto
+            totalReceived: total,
+            change: 0,
+            location: currentLocation,
+            paymentType: 'exact', // Identificar como pago exacto
+        };
+
+        onSaveTransaction(transaction);
+        resetCalculator();
+    };
+
+    // Función para procesar el pago compuesto
+    const handleCompositePayment = () => {
+        const amount = parseFloat(compositeAmount);
+        if (isNaN(amount) || amount < total) {
+            Alert.alert(
+                'Error',
+                'El monto debe ser un número válido y mayor o igual al total de la venta.',
+                [{ text: 'OK' }]
+            );
+            return;
+        }
+
+        const calculatedChange = amount - total;
+
+        Alert.alert(
+            'Confirmar Pago Compuesto',
+            `Total: $${total.toFixed(2)}\nRecibido: $${amount.toFixed(2)}\nCambio a dar: $${calculatedChange.toFixed(2)}`,
+            [
+                {
+                    text: "Cancelar",
+                    style: "cancel"
+                },
+                {
+                    text: "Confirmar",
+                    onPress: () => {
+                        const transaction = {
+                            type: saleType,
+                            quantity,
+                            unitPrice: saleType === 'carton'
+                                ? eggsPrice
+                                : saleType === 'half_carton'
+                                    ? eggsPrice / 2
+                                    : eggsPrice * 12,
+                            total,
+                            receivedMoney: { [amount]: 1 }, // Marcar el monto compuesto
+                            totalReceived: amount,
+                            change: calculatedChange,
+                            location: currentLocation,
+                            paymentType: 'composite', // Identificar como pago compuesto
+                        };
+
+                        onSaveTransaction(transaction);
+                        resetCalculator();
+                    }
+                }
+            ]
+        );
     };
 
     // Función para confirmar la venta
@@ -227,6 +306,22 @@ const SaleCalculator = ({ onSaveTransaction, eggsPrice, currentLocation }) => {
                 </Text>
             </View>
 
+            {/* Botones de pago especial */}
+            <View style={styles.specialPaymentContainer}>
+                <TouchableOpacity
+                    style={styles.specialPaymentButton}
+                    onPress={handleExactPayment}
+                >
+                    <Text style={styles.specialPaymentText}>Pago Exacto</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                    style={styles.specialPaymentButton}
+                    onPress={() => setShowCompositePayment(true)}
+                >
+                    <Text style={styles.specialPaymentText}>Pago Compuesto</Text>
+                </TouchableOpacity>
+            </View>
+
             <View style={styles.billsContainer}>
                 {BILLS.map((bill) => (
                     <TouchableOpacity
@@ -282,9 +377,71 @@ const SaleCalculator = ({ onSaveTransaction, eggsPrice, currentLocation }) => {
         </View>
     );
 
+    // Renderizado del modal de pago compuesto
+    const renderCompositePaymentModal = () => (
+        <Modal
+            animationType="slide"
+            transparent={true}
+            visible={showCompositePayment}
+            onRequestClose={() => setShowCompositePayment(false)}
+        >
+            <View style={styles.modalOverlay}>
+                <View style={styles.modalContent}>
+                    <Text style={styles.modalTitle}>Pago Compuesto</Text>
+                    <Text style={styles.modalSubtitle}>
+                        Total a pagar: ${total.toFixed(2)}
+                    </Text>
+
+                    <View style={styles.inputContainer}>
+                        <Text style={styles.inputLabel}>Monto recibido ($):</Text>
+                        <TextInput
+                            style={styles.input}
+                            value={compositeAmount}
+                            onChangeText={setCompositeAmount}
+                            keyboardType="numeric"
+                            placeholder={total.toFixed(2)}
+                            placeholderTextColor="#666"
+                        />
+                    </View>
+
+                    {compositeAmount && !isNaN(parseFloat(compositeAmount)) && parseFloat(compositeAmount) >= total && (
+                        <Text style={styles.changePreview}>
+                            Cambio a dar: ${(parseFloat(compositeAmount) - total).toFixed(2)}
+                        </Text>
+                    )}
+
+                    <View style={styles.modalButtonsContainer}>
+                        <TouchableOpacity
+                            style={[styles.modalButton, styles.cancelButton]}
+                            onPress={() => {
+                                setShowCompositePayment(false);
+                                setCompositeAmount('');
+                            }}
+                        >
+                            <Text style={styles.modalButtonText}>Cancelar</Text>
+                        </TouchableOpacity>
+
+                        <TouchableOpacity
+                            style={[
+                                styles.modalButton,
+                                styles.confirmButton,
+                                (!compositeAmount || isNaN(parseFloat(compositeAmount)) || parseFloat(compositeAmount) < total) && styles.disabledButton
+                            ]}
+                            onPress={handleCompositePayment}
+                            disabled={!compositeAmount || isNaN(parseFloat(compositeAmount)) || parseFloat(compositeAmount) < total}
+                        >
+                            <Text style={styles.modalButtonText}>Confirmar</Text>
+                        </TouchableOpacity>
+                    </View>
+                </View>
+            </View>
+        </Modal>
+    );
+
     return (
         <ScrollView style={styles.container}>
             {step === 'quantity' ? renderQuantityStep() : renderPaymentStep()}
+            {renderCompositePaymentModal()}
         </ScrollView>
     );
 };
@@ -505,6 +662,93 @@ const styles = StyleSheet.create({
     backButtonText: {
         color: COLORS.text,
         fontSize: 16,
+    },
+    specialPaymentContainer: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        marginBottom: 15,
+    },
+    specialPaymentButton: {
+        flex: 1,
+        backgroundColor: COLORS.primary,
+        padding: 12,
+        borderRadius: 5,
+        alignItems: 'center',
+        marginHorizontal: 5,
+    },
+    specialPaymentText: {
+        color: COLORS.text,
+        fontSize: 14,
+        fontWeight: 'bold',
+    },
+    modalOverlay: {
+        flex: 1,
+        backgroundColor: 'rgba(0, 0, 0, 0.5)',
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    modalContent: {
+        width: '85%',
+        backgroundColor: COLORS.card,
+        borderRadius: 10,
+        padding: 20,
+    },
+    modalTitle: {
+        fontSize: 18,
+        fontWeight: 'bold',
+        color: COLORS.text,
+        marginBottom: 10,
+        textAlign: 'center',
+    },
+    modalSubtitle: {
+        fontSize: 16,
+        color: COLORS.text,
+        marginBottom: 15,
+        textAlign: 'center',
+    },
+    inputContainer: {
+        marginBottom: 15,
+    },
+    inputLabel: {
+        color: COLORS.text,
+        fontSize: 16,
+        marginBottom: 5,
+    },
+    input: {
+        backgroundColor: COLORS.background,
+        color: COLORS.text,
+        borderRadius: 5,
+        paddingHorizontal: 10,
+        paddingVertical: 12,
+        fontSize: 16,
+        borderWidth: 1,
+        borderColor: COLORS.border,
+    },
+    changePreview: {
+        color: COLORS.success,
+        fontSize: 16,
+        fontWeight: 'bold',
+        textAlign: 'center',
+        marginBottom: 15,
+    },
+    modalButtonsContainer: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        marginTop: 10,
+    },
+    modalButton: {
+        flex: 1,
+        paddingVertical: 12,
+        borderRadius: 5,
+        alignItems: 'center',
+    },
+    cancelButton: {
+        backgroundColor: COLORS.error,
+        marginRight: 5,
+    },
+    modalButtonText: {
+        color: COLORS.text,
+        fontWeight: 'bold',
     },
 });
 

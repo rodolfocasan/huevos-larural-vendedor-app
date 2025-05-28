@@ -13,7 +13,7 @@ import {
     Dimensions,
 } from "react-native";
 import * as Location from "expo-location";
-import MapView, { Marker, Polyline } from "react-native-maps";
+import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
 
 import { COLORS, formatTime, formatDate } from "../Utils/Constants";
 
@@ -33,6 +33,8 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
     const [locationPermission, setLocationPermission] = useState(null);
     const [currentLocation, setCurrentLocation] = useState(null);
     const [isLoadingLocation, setIsLoadingLocation] = useState(false);
+    const [showMap, setShowMap] = useState(false);
+    const [gpsEnabled, setGpsEnabled] = useState(false);
 
     // Estados para el mapa
     const [mapRegion, setMapRegion] = useState({
@@ -43,6 +45,7 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
     });
     const [userLocation, setUserLocation] = useState(null);
     const [isTrackingLocation, setIsTrackingLocation] = useState(false);
+    const [mapRef, setMapRef] = useState(null); // Agregar referencia al mapa
 
     // Estados del formulario de cliente
     const [clientForm, setClientForm] = useState({
@@ -72,9 +75,9 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
         (client) => client.status === "pending"
     );
 
-    // Solicitar permisos de ubicación al cargar el componente
+    // Verificar GPS y solicitar permisos de ubicación al cargar el componente
     useEffect(() => {
-        requestLocationPermission();
+        checkGPSAndPermissions();
     }, []);
 
     // Efecto para rastrear la ubicación del usuario en tiempo real
@@ -120,34 +123,70 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
         };
     }, [locationPermission, isTrackingLocation]);
 
-    // Función para solicitar permisos de ubicación
-    const requestLocationPermission = async () => {
+    // Función para verificar GPS y solicitar permisos de ubicación
+    const checkGPSAndPermissions = async () => {
         try {
+            // Verificar si el GPS está habilitado
+            const gpsStatus = await Location.hasServicesEnabledAsync();
+            setGpsEnabled(gpsStatus);
+
+            if (!gpsStatus) {
+                Alert.alert(
+                    "GPS Deshabilitado",
+                    "Por favor, habilite el GPS en la configuración de su dispositivo para usar las funciones de ubicación.",
+                    [{ text: "OK" }]
+                );
+                return;
+            }
+
             const { status } = await Location.requestForegroundPermissionsAsync();
             setLocationPermission(status === "granted");
 
-            if (status === "granted") {
-                setIsTrackingLocation(true);
-                // Obtener ubicación inicial
-                const location = await Location.getCurrentPositionAsync({
-                    accuracy: Location.Accuracy.High,
-                });
-                const { latitude, longitude } = location.coords;
-                setUserLocation({ latitude, longitude });
-                setMapRegion({
-                    latitude,
-                    longitude,
-                    latitudeDelta: 0.01,
-                    longitudeDelta: 0.01,
-                });
-            } else {
+            if (status !== "granted") {
                 Alert.alert(
                     "Permisos requeridos",
                     "Se necesitan permisos de ubicación para mostrar la ruta en el mapa."
                 );
             }
         } catch (error) {
-            console.error("Error al solicitar permisos de ubicación:", error);
+            console.error("Error al verificar GPS y permisos:", error);
+        }
+    };
+
+    // Función para mostrar el mapa con verificaciones
+    const showMapWithPermissions = async () => {
+        if (!gpsEnabled) {
+            Alert.alert(
+                "GPS Deshabilitado",
+                "Por favor, habilite el GPS en la configuración de su dispositivo.",
+                [{ text: "OK" }]
+            );
+            return;
+        }
+
+        if (!locationPermission) {
+            await checkGPSAndPermissions();
+            if (!locationPermission) return;
+        }
+
+        try {
+            setIsTrackingLocation(true);
+            // Obtener ubicación inicial
+            const location = await Location.getCurrentPositionAsync({
+                accuracy: Location.Accuracy.High,
+            });
+            const { latitude, longitude } = location.coords;
+            setUserLocation({ latitude, longitude });
+            setMapRegion({
+                latitude,
+                longitude,
+                latitudeDelta: 0.01,
+                longitudeDelta: 0.01,
+            });
+            setShowMap(true);
+        } catch (error) {
+            console.error("Error al obtener ubicación:", error);
+            Alert.alert("Error", "No se pudo obtener la ubicación actual");
         }
     };
 
@@ -362,12 +401,12 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
     // Función para eliminar un cliente
     const deleteClient = (clientId) => {
         Alert.alert(
-            "Confirmar eliminación",
-            "¿Estás seguro de que deseas eliminar este cliente?",
+            "Eliminar cliente permanentemente",
+            "⚠️ ADVERTENCIA: Está a punto de eliminar todos los datos y registros de este cliente para siempre. Esta acción no se puede deshacer.\n\n¿Está completamente seguro?",
             [
                 { text: "Cancelar", style: "cancel" },
                 {
-                    text: "Eliminar",
+                    text: "Eliminar para siempre",
                     style: "destructive",
                     onPress: () => {
                         const updatedClients = clients.filter(
@@ -388,7 +427,7 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
     const markAsDelivered = (clientId) => {
         Alert.alert(
             "Confirmar entrega",
-            "Se registrará que el pedido ha sido entregado al cliente sin problemas.",
+            "Se registrará que el pedido ha sido entregado al cliente sin problemas y el cliente regresará a la sección de pendientes.",
             [
                 { text: "Cancelar", style: "cancel" },
                 {
@@ -415,13 +454,14 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
                             timestamp: new Date().toISOString(),
                         };
 
-                        // Actualizar el cliente a delivered
+                        // Actualizar el cliente a pending (no eliminarlo)
                         const updatedClients = clients.map((c) => {
                             if (c.id === clientId) {
                                 return {
                                     ...c,
-                                    status: "delivered",
+                                    status: "pending",
                                     deliveredAt: new Date().toISOString(),
+                                    confirmedAt: null,
                                 };
                             }
                             return c;
@@ -445,16 +485,24 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
     const cancelConfirmedOrder = (clientId) => {
         Alert.alert(
             "Cancelar pedido",
-            "El pedido ha sido cancelado por el cliente y se removerá de la sección de confirmados.",
+            "El pedido ha sido cancelado por el cliente y regresará a la sección de pendientes.",
             [
                 { text: "Cancelar", style: "cancel" },
                 {
                     text: "Aceptar",
                     style: "destructive",
                     onPress: () => {
-                        const updatedClients = clients.filter(
-                            (client) => client.id !== clientId
-                        );
+                        const updatedClients = clients.map((client) => {
+                            if (client.id === clientId) {
+                                return {
+                                    ...client,
+                                    status: "pending",
+                                    confirmedAt: null,
+                                    cancelledAt: new Date().toISOString(),
+                                };
+                            }
+                            return client;
+                        });
                         const updatedSale = {
                             ...sale,
                             clients: updatedClients,
@@ -468,13 +516,13 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
 
     // Función para centrar el mapa en la ubicación del usuario
     const centerMapOnUser = () => {
-        if (userLocation) {
-            setMapRegion({
+        if (userLocation && mapRef) {
+            mapRef.animateToRegion({
                 latitude: userLocation.latitude,
                 longitude: userLocation.longitude,
                 latitudeDelta: 0.01,
                 longitudeDelta: 0.01,
-            });
+            }, 1000);
         }
     };
 
@@ -533,18 +581,26 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
                             <Text style={styles.editButtonText}>✏️ Editar información</Text>
                         </TouchableOpacity>
                         <TouchableOpacity
-                            style={styles.statusButton}
+                            style={styles.confirmButton}
                             onPress={() => toggleClientStatus(item.id)}
                         >
-                            <Text style={styles.statusButtonText}>🔄 Pendiente</Text>
+                            <Text style={styles.confirmButtonText}>🔃 El cliente confirmó</Text>
                         </TouchableOpacity>
                     </View>
-                    <TouchableOpacity
-                        style={styles.deleteButton}
-                        onPress={() => deleteClient(item.id)}
-                    >
-                        <Text style={styles.deleteButtonText}>× Eliminar cliente</Text>
-                    </TouchableOpacity>
+                    <View style={styles.clientBottomActions}>
+                        <TouchableOpacity
+                            style={styles.mapButton}
+                            onPress={() => centerMapOnClient(item)}
+                        >
+                            <Text style={styles.mapButtonText}>🗺️ Ver en el mapa</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                            style={styles.deleteButton}
+                            onPress={() => deleteClient(item.id)}
+                        >
+                            <Text style={styles.deleteButtonText}>🗑️ Eliminar cliente</Text>
+                        </TouchableOpacity>
+                    </View>
                 </View>
             ) : (
                 <View style={styles.clientActionsContainer}>
@@ -562,6 +618,12 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
                             <Text style={styles.cancelOrderButtonText}>❌ Pedido cancelado</Text>
                         </TouchableOpacity>
                     </View>
+                    <TouchableOpacity
+                        style={styles.mapButton}
+                        onPress={() => centerMapOnClient(item)}
+                    >
+                        <Text style={styles.mapButtonText}>🗺️ Ver en el mapa</Text>
+                    </TouchableOpacity>
                 </View>
             )}
         </View>
@@ -780,8 +842,34 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
         </Modal>
     );
 
-    // Obtener la lista de clientes actual según la pestaña activa
-    const currentClients = activeClientTab === 'confirmed' ? confirmedClients : pendingClients;
+    // Función para centrar el mapa en un cliente específico
+    const centerMapOnClient = (client) => {
+        if (!showMap) {
+            Alert.alert(
+                "Mapa desactivado",
+                "Debe activar la vista de mapa presionando el botón 'Mostrar Mapa' para ver la ubicación del cliente."
+            );
+            return;
+        }
+
+        if (!client.location) {
+            Alert.alert("Error", "Este cliente no tiene ubicación registrada");
+            return;
+        }
+
+        if (mapRef) {
+            mapRef.animateToRegion({
+                latitude: client.location.latitude,
+                longitude: client.location.longitude,
+                latitudeDelta: 0.005,
+                longitudeDelta: 0.005,
+            }, 1000);
+        }
+    };
+
+    // Obtener la lista de clientes actual según la pestaña activa (ordenados del más reciente al más antiguo)
+    const currentClients = (activeClientTab === 'confirmed' ? confirmedClients : pendingClients)
+        .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 
     return (
         <View style={styles.container}>
@@ -790,88 +878,115 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
                 showsVerticalScrollIndicator={false}
                 contentContainerStyle={styles.scrollContent}
             >
-                {/* Mapa de la ruta */}
-                <View style={styles.mapContainer}>
-                    <MapView
-                        style={styles.map}
-                        region={mapRegion}
-                        onRegionChangeComplete={setMapRegion}
-                        mapType="standard" // Usar OpenStreetMap como base
-                        showsUserLocation={true}
-                        showsMyLocationButton={false}
-                        followsUserLocation={false}
-                    >
-                        {/* Marcador para la ubicación del usuario */}
-                        {userLocation && (
-                            <Marker
-                                coordinate={userLocation}
-                                title="Tu ubicación"
-                                description="Ubicación actual"
-                                pinColor="blue"
-                            />
-                        )}
+                {/* Botón para mostrar mapa */}
+                {!showMap ? (
+                    <View style={styles.mapPlaceholder}>
+                        <Text style={styles.mapPlaceholderText}>
+                            {!gpsEnabled
+                                ? "GPS deshabilitado. Habilite el GPS para usar el mapa."
+                                : "El mapa está oculto para mejorar el rendimiento."
+                            }
+                        </Text>
+                        <TouchableOpacity
+                            style={[
+                                styles.showMapButton,
+                                !gpsEnabled && styles.disabledButton
+                            ]}
+                            onPress={showMapWithPermissions}
+                            disabled={!gpsEnabled}
+                        >
+                            <Text style={styles.showMapButtonText}>
+                                {!gpsEnabled ? "🔒 Habilitar GPS" : "🗺️ Mostrar Mapa"}
+                            </Text>
+                        </TouchableOpacity>
+                    </View>
+                ) : (
+                    /* Mapa de la ruta */
+                    <View style={styles.mapContainer}>
+                        <MapView
+                            ref={(ref) => setMapRef(ref)}
+                            provider={PROVIDER_GOOGLE}
+                            style={styles.map}
+                            initialRegion={mapRegion}
+                            showsUserLocation={true}
+                            showsMyLocationButton={false}
+                            showsCompass={true}
+                            showsScale={true}
+                            scrollEnabled={true}
+                            zoomEnabled={true}
+                            loadingEnabled={true}
+                            loadingIndicatorColor={COLORS.accent}
+                            loadingBackgroundColor={COLORS.background}
+                            onMapReady={() => {
+                                console.log('Mapa cargado correctamente');
+                            }}
+                            onError={(error) => {
+                                console.error('Error en el mapa:', error);
+                            }}
+                        >
+                            {/* Marcador para la ubicación del usuario */}
+                            {userLocation && (
+                                <Marker
+                                    coordinate={userLocation}
+                                    title="Tu ubicación"
+                                    pinColor="blue"
+                                />
+                            )}
 
-                        {/* Marcadores para clientes confirmados */}
-                        {confirmedClients.map(
-                            (client, index) =>
-                                client.location && (
-                                    <Marker
-                                        key={`confirmed-${client.id}`}
-                                        coordinate={{
-                                            latitude: client.location.latitude,
-                                            longitude: client.location.longitude,
-                                        }}
-                                        title={client.name || "Cliente"}
-                                        description={`${client.quantity || 0} cajas - Confirmado`}
-                                        pinColor="green"
-                                        onPress={() => {
-                                            // Prevenir bloqueo con un handler vacío controlado
-                                            console.log(`Marcador confirmado presionado: ${client.name}`);
-                                        }}
-                                    />
-                                )
-                        )}
+                            {/* Marcadores para clientes confirmados */}
+                            {confirmedClients.filter(client => client.location).map(client => (
+                                <Marker
+                                    key={`confirmed-${client.id}`}
+                                    coordinate={{
+                                        latitude: client.location.latitude,
+                                        longitude: client.location.longitude,
+                                    }}
+                                    title={client.name || "Cliente"}
+                                    description={`${client.quantity || 0} cajas - Confirmado`}
+                                    pinColor="green"
+                                />
+                            ))}
 
-                        {/* Marcadores para clientes pendientes */}
-                        {pendingClients.map(
-                            (client, index) =>
-                                client.location && (
-                                    <Marker
-                                        key={`pending-${client.id}`}
-                                        coordinate={{
-                                            latitude: client.location.latitude,
-                                            longitude: client.location.longitude,
-                                        }}
-                                        title={client.name || "Cliente"}
-                                        description={`${client.quantity || 0} cajas - Pendiente`}
-                                        pinColor="orange"
-                                        onPress={() => {
-                                            // Prevenir bloqueo con un handler vacío controlado
-                                            console.log(`Marcador pendiente presionado: ${client.name}`);
-                                        }}
-                                    />
-                                )
-                        )}
+                            {/* Marcadores para clientes pendientes */}
+                            {pendingClients.filter(client => client.location).map(client => (
+                                <Marker
+                                    key={`pending-${client.id}`}
+                                    coordinate={{
+                                        latitude: client.location.latitude,
+                                        longitude: client.location.longitude,
+                                    }}
+                                    title={client.name || "Cliente"}
+                                    description={`${client.quantity || 0} cajas - Pendiente`}
+                                    pinColor="orange"
+                                />
+                            ))}
 
-                        {/* Polyline para mostrar la ruta */}
-                        {generateRouteCoordinates().length > 1 && (
-                            <Polyline
-                                coordinates={generateRouteCoordinates()}
-                                strokeColor={COLORS.accent}
-                                strokeWidth={3}
-                                lineDashPattern={[5, 5]}
-                            />
-                        )}
-                    </MapView>
+                            {/* Polyline para la ruta */}
+                            {generateRouteCoordinates().length > 1 && (
+                                <Polyline
+                                    coordinates={generateRouteCoordinates()}
+                                    strokeColor={COLORS.accent}
+                                    strokeWidth={3}
+                                />
+                            )}
+                        </MapView>
 
-                    {/* Botón para centrar en ubicación del usuario */}
-                    <TouchableOpacity
-                        style={styles.centerButton}
-                        onPress={centerMapOnUser}
-                    >
-                        <Text style={styles.centerButtonText}>📍</Text>
-                    </TouchableOpacity>
-                </View>
+                        <View style={styles.mapButtonsContainer}>
+                            <TouchableOpacity
+                                style={styles.mapActionButton}
+                                onPress={centerMapOnUser}
+                            >
+                                <Text style={styles.mapActionButtonText}>📍</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                                style={styles.mapActionButton}
+                                onPress={() => setShowMap(false)}
+                            >
+                                <Text style={styles.mapActionButtonText}>✕</Text>
+                            </TouchableOpacity>
+                        </View>
+                    </View>
+                )}
 
                 {/* Resumen de la ruta */}
                 <View style={styles.routeSummary}>
@@ -982,26 +1097,8 @@ const styles = StyleSheet.create({
         flex: 1,
         borderRadius: 10,
         margin: 10,
-    },
-    centerButton: {
-        position: "absolute",
-        bottom: 20,
-        right: 20,
-        backgroundColor: COLORS.accent,
-        width: 50,
-        height: 50,
-        borderRadius: 25,
-        justifyContent: "center",
-        alignItems: "center",
-        elevation: 5,
-        shadowColor: "#000",
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.25,
-        shadowRadius: 3.84,
-    },
-    centerButtonText: {
-        fontSize: 20,
-        color: COLORS.text,
+        width: '100%',
+        height: '100%',
     },
     routeSummary: {
         backgroundColor: COLORS.card,
@@ -1105,15 +1202,15 @@ const styles = StyleSheet.create({
     },
     deleteButton: {
         backgroundColor: COLORS.error,
-        width: 30,
-        height: 30,
-        borderRadius: 15,
-        justifyContent: "center",
+        paddingHorizontal: 15,
+        paddingVertical: 10,
+        borderRadius: 8,
         alignItems: "center",
+        marginTop: 5,
     },
     deleteButtonText: {
         color: COLORS.text,
-        fontSize: 18,
+        fontSize: 12,
         fontWeight: "bold",
     },
     clientContact: {
@@ -1240,6 +1337,23 @@ const styles = StyleSheet.create({
         gap: 8,
         marginBottom: 10,
     },
+    clientBottomActions: {
+        flexDirection: 'row',
+        gap: 8,
+    },
+    mapButton: {
+        backgroundColor: COLORS.accent,
+        paddingHorizontal: 15,
+        paddingVertical: 10,
+        borderRadius: 8,
+        alignItems: 'center',
+        flex: 1,
+    },
+    mapButtonText: {
+        color: COLORS.text,
+        fontSize: 12,
+        fontWeight: 'bold',
+    },
     editButton: {
         backgroundColor: COLORS.accent,
         paddingHorizontal: 12,
@@ -1253,14 +1367,14 @@ const styles = StyleSheet.create({
         fontWeight: 'bold',
         textAlign: 'center',
     },
-    statusButton: {
-        backgroundColor: COLORS.warning,
+    confirmButton: {
+        backgroundColor: COLORS.success,
         paddingHorizontal: 12,
         paddingVertical: 8,
         borderRadius: 8,
         flex: 1,
     },
-    statusButtonText: {
+    confirmButtonText: {
         color: COLORS.text,
         fontSize: 12,
         fontWeight: 'bold',
@@ -1292,16 +1406,64 @@ const styles = StyleSheet.create({
         fontWeight: 'bold',
         textAlign: 'center',
     },
-    deleteButton: {
-        backgroundColor: COLORS.error,
-        paddingHorizontal: 12,
-        paddingVertical: 8,
-        borderRadius: 8,
+    mapPlaceholder: {
+        height: 200,
+        backgroundColor: COLORS.cardBackground,
+        margin: 15,
+        borderRadius: 10,
+        justifyContent: 'center',
         alignItems: 'center',
+        padding: 20,
+        borderWidth: 1,
+        borderColor: COLORS.border,
     },
-    deleteButtonText: {
-        color: COLORS.text,
-        fontSize: 12,
+    mapPlaceholderText: {
+        fontSize: 16,
+        color: COLORS.textSecondary,
+        textAlign: 'center',
+        marginBottom: 15,
+    },
+    showMapButton: {
+        backgroundColor: COLORS.primary,
+        paddingHorizontal: 20,
+        paddingVertical: 12,
+        borderRadius: 8,
+    },
+    showMapButtonText: {
+        color: COLORS.textLight,
+        fontSize: 16,
+        fontWeight: 'bold',
+    },
+    disabledButton: {
+        backgroundColor: COLORS.textSecondary,
+        opacity: 0.6,
+    },
+    mapButtonsContainer: {
+        position: 'absolute',
+        top: 15,
+        right: 5,
+        backgroundColor: 'rgba(0,0,0,0.8)',
+        borderRadius: 50,
+        padding: 6,
+        elevation: 5,
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.25,
+        shadowRadius: 3.84,
+        flexDirection: 'row',
+    },
+    mapActionButton: {
+        width: 36,
+        height: 36,
+        borderRadius: 18,
+        backgroundColor: 'rgba(255,255,255,0.15)',
+        justifyContent: 'center',
+        alignItems: 'center',
+        marginHorizontal: 5,
+    },
+    mapActionButtonText: {
+        color: 'white',
+        fontSize: 18,
         fontWeight: 'bold',
     },
 });
