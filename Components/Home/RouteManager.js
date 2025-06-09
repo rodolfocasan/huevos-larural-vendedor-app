@@ -11,15 +11,25 @@ import {
     Alert,
     ActivityIndicator,
     Dimensions,
+    Button,
+    Image
 } from "react-native";
 import * as Location from "expo-location";
-import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
+import MapView, { Marker, Polyline, UrlTile } from 'react-native-maps';
+import * as FileSystem from 'expo-file-system';
+import { CameraView, CameraType, Camera } from 'expo-camera';
+
 
 import { COLORS, formatTime, formatDate } from "../Utils/Constants";
 
 
 
 
+
+// Constantes para la gestión de tiles
+const TILE_FOLDER = `${FileSystem.documentDirectory}tiles`;
+const ONLINE_TILE_URL = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
+const OFFLINE_TILE_URL = `file://${TILE_FOLDER}/{z}/{x}/{y}.png`;
 
 // Componente para gestionar la ruta de ventas y clientes
 const { width, height } = Dimensions.get("window");
@@ -55,7 +65,29 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
         location: null,
         address: "",
         status: "pending", // 'pending' o 'confirmed'
+        photos: [], // Array de fotos en base64
     });
+
+    // Estados para la cámara y fotos
+    const [cameraVisible, setCameraVisible] = useState(false);
+    const [cameraRef, setCameraRef] = useState(null);
+    const [cameraPermission, setCameraPermission] = useState(null);
+    const [capturedPhoto, setCapturedPhoto] = useState(null);
+    const [photoConfirmVisible, setPhotoConfirmVisible] = useState(false);
+    const [imageViewerVisible, setImageViewerVisible] = useState(false);
+    const [selectedImageIndex, setSelectedImageIndex] = useState(0);
+    const [viewingImages, setViewingImages] = useState([]);
+
+    // Estados para la funcionalidad offline
+    const [isOfflineMode, setIsOfflineMode] = useState(false); // Controla el modo online/offline
+
+    // Estados para la descarga offline
+    const [offlineDownloadModalVisible, setOfflineDownloadModalVisible] = useState(false);
+    const [isDownloading, setIsDownloading] = useState(false);
+    const [downloadProgress, setDownloadProgress] = useState(0);
+    const [downloadStatus, setDownloadStatus] = useState(''); // Estado textual
+    const [totalTiles, setTotalTiles] = useState(0);
+    const [downloadedTiles, setDownloadedTiles] = useState(0);
 
     // Verificación si la venta está cargada
     if (!sale) {
@@ -75,9 +107,40 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
         (client) => client.status === "pending"
     );
 
+    // Función para solicitar permisos de cámara
+    const requestCameraPermissions = async () => {
+        try {
+            // Verificar el estado actual de los permisos
+            const { status: existingStatus } = await Camera.getCameraPermissionsAsync();
+            let finalStatus = existingStatus;
+
+            // Si no se han concedido, solicitar permisos
+            if (existingStatus !== 'granted') {
+                const { status } = await Camera.requestCameraPermissionsAsync();
+                finalStatus = status;
+            }
+
+            setCameraPermission(finalStatus === 'granted');
+
+            if (finalStatus !== 'granted') {
+                Alert.alert(
+                    'Permisos requeridos',
+                    'Se necesitan permisos de cámara para tomar fotos. Por favor, habilite los permisos en la configuración de su dispositivo.',
+                    [
+                        { text: 'OK', onPress: () => console.log('Permisos denegados') }
+                    ]
+                );
+            }
+        } catch (error) {
+            console.error('Error al solicitar permisos de cámara:', error);
+            Alert.alert('Error', 'No se pudieron solicitar los permisos de cámara.');
+        }
+    };
+
     // Verificar GPS y solicitar permisos de ubicación al cargar el componente
     useEffect(() => {
         checkGPSAndPermissions();
+        requestCameraPermissions();
     }, []);
 
     // Efecto para rastrear la ubicación del usuario en tiempo real
@@ -122,6 +185,120 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
             }
         };
     }, [locationPermission, isTrackingLocation]);
+
+    // Función unificada para descargar tiles con progreso
+    const downloadTilesWithProgress = async () => {
+        try {
+            setIsDownloading(true);
+            setDownloadProgress(0);
+            setDownloadedTiles(0);
+
+            // Calcular tiles necesarios
+            const currentZoom = calculateZoomLevel(mapRegion.longitudeDelta);
+            const minZoom = Math.max(10, currentZoom - 2); // Zoom mínimo 10
+            const maxZoom = Math.min(18, currentZoom + 2); // Zoom máximo 18
+            const tiles = getTileGrid(mapRegion, minZoom, maxZoom);
+
+            setTotalTiles(tiles.length);
+            setDownloadStatus(`Preparando descarga de ${tiles.length} tiles...`);
+
+            // Crear directorio principal si no existe
+            const dirInfo = await FileSystem.getInfoAsync(TILE_FOLDER);
+            if (!dirInfo.exists) {
+                await FileSystem.makeDirectoryAsync(TILE_FOLDER, { intermediates: true });
+            }
+
+            // Descargar tiles uno por uno
+            for (let i = 0; i < tiles.length; i++) {
+                const tile = tiles[i];
+                const progress = (i + 1) / tiles.length;
+
+                setDownloadStatus(`Descargando tile ${i + 1} de ${tiles.length}...`);
+                setDownloadProgress(progress);
+                setDownloadedTiles(i + 1);
+
+                try {
+                    await downloadSingleTile(tile);
+                } catch (tileError) {
+                    console.warn(`Error descargando tile ${tile.z}/${tile.x}/${tile.y}:`, tileError);
+                    // Continuar con el siguiente tile si uno falla
+                }
+            }
+
+            setDownloadStatus('¡Descarga completada exitosamente!');
+            setDownloadProgress(1);
+
+            // Esperar un momento para mostrar el mensaje de éxito
+            setTimeout(() => {
+                setIsDownloading(false);
+                setOfflineDownloadModalVisible(false);
+                Alert.alert('Éxito', 'Mapas offline descargados correctamente.');
+            }, 1500);
+
+        } catch (error) {
+            console.error('Error en descarga offline:', error);
+            setDownloadStatus('Error en la descarga');
+            setIsDownloading(false);
+            Alert.alert('Error', 'No se pudieron descargar los mapas offline.');
+        }
+    };
+
+    // Función para descargar un tile individual
+    const downloadSingleTile = async (tile) => {
+        const url = `https://tile.openstreetmap.org/${tile.z}/${tile.x}/${tile.y}.png`;
+        const dir = `${TILE_FOLDER}/${tile.z}/${tile.x}`;
+        const path = `${dir}/${tile.y}.png`;
+
+        // Crear directorio si no existe
+        const dirInfo = await FileSystem.getInfoAsync(dir);
+        if (!dirInfo.exists) {
+            await FileSystem.makeDirectoryAsync(dir, { intermediates: true });
+        }
+
+        // Verificar si el archivo ya existe
+        const fileInfo = await FileSystem.getInfoAsync(path);
+        if (fileInfo.exists) {
+            return; // Saltar si ya existe
+        }
+
+        // Descargar el tile
+        await FileSystem.downloadAsync(url, path);
+    };
+
+    // Convertir coordenadas de latitud/longitud a tiles
+    const latLonToTile = (lat, lon, zoom) => {
+        const latRad = lat * Math.PI / 180;
+        const n = Math.pow(2, zoom);
+        const x = Math.floor(((lon + 180) / 360) * n);
+        const y = Math.floor(((1 - Math.log(Math.tan(latRad) + (1 / Math.cos(latRad))) / Math.PI) / 2) * n);
+        return { x, y };
+    };
+
+    // Calcular nivel de zoom basado en longitudeDelta
+    const calculateZoomLevel = (longitudeDelta) => {
+        return Math.round(Math.log(360 / longitudeDelta) / Math.LN2);
+    };
+
+    // Obtener los tiles necesarios para una región
+    const getTileGrid = (region, minZoom, maxZoom) => {
+        const tiles = [];
+        const { latitude, longitude, latitudeDelta, longitudeDelta } = region;
+        const latMin = latitude - latitudeDelta / 2;
+        const latMax = latitude + latitudeDelta / 2;
+        const lonMin = longitude - longitudeDelta / 2;
+        const lonMax = longitude + longitudeDelta / 2;
+
+        for (let zoom = minZoom; zoom <= maxZoom; zoom++) {
+            const topLeft = latLonToTile(latMax, lonMin, zoom);
+            const bottomRight = latLonToTile(latMin, lonMax, zoom);
+            for (let x = topLeft.x; x <= bottomRight.x; x++) {
+                for (let y = topLeft.y; y <= bottomRight.y; y++) {
+                    tiles.push({ x, y, z: zoom });
+                }
+            }
+        }
+        return tiles;
+    };
 
     // Función para verificar GPS y solicitar permisos de ubicación
     const checkGPSAndPermissions = async () => {
@@ -201,21 +378,37 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
         try {
             const location = await Location.getCurrentPositionAsync({
                 accuracy: Location.Accuracy.High,
+                timeout: 15000, // Tiempo de espera más largo para GPS
             });
 
             const { latitude, longitude } = location.coords;
+            let address = `Coordenadas: ${latitude.toFixed(6)}, ${longitude.toFixed(6)}`;
 
-            // Obtener dirección aproximada usando geocodificación inversa
-            const addressResponse = await Location.reverseGeocodeAsync({
-                latitude,
-                longitude,
-            });
+            // Solo intentar geocodificación si estamos en modo online
+            if (!isOfflineMode) {
+                try {
+                    const addressResponse = await Location.reverseGeocodeAsync({
+                        latitude,
+                        longitude,
+                    });
 
-            let address = "Ubicación no disponible";
-            if (addressResponse.length > 0) {
-                const addr = addressResponse[0];
-                address = `${addr.street || ""} ${addr.streetNumber || ""}, ${addr.city || ""
-                    }, ${addr.region || ""}`.trim();
+                    if (addressResponse.length > 0) {
+                        const addr = addressResponse[0];
+                        const addressParts = [
+                            addr.street,
+                            addr.streetNumber,
+                            addr.city,
+                            addr.region
+                        ].filter(Boolean);
+
+                        if (addressParts.length > 0) {
+                            address = addressParts.join(', ');
+                        }
+                    }
+                } catch (geocodeError) {
+                    console.warn("Error en geocodificación:", geocodeError);
+                    // Mantener las coordenadas como dirección
+                }
             }
 
             setCurrentLocation({ latitude, longitude });
@@ -224,9 +417,15 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
                 location: { latitude, longitude },
                 address: address,
             }));
+
+            Alert.alert("Éxito", "Ubicación obtenida correctamente");
+
         } catch (error) {
-            console.error("Error al obtener ubicación:", error);
-            Alert.alert("Error", "No se pudo obtener la ubicación actual");
+            console.error("Error al obtener ubicación GPS:", error);
+            Alert.alert(
+                "Error GPS",
+                "No se pudo obtener la ubicación. Verifique que:\n• El GPS esté habilitado\n• Tenga señal GPS (intente al aire libre)\n• Los permisos de ubicación estén activos"
+            );
         } finally {
             setIsLoadingLocation(false);
         }
@@ -241,7 +440,60 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
             location: null,
             address: "",
             status: "pending",
+            photos: [],
         });
+    };
+
+    // Funciones para la cámara
+    const openCamera = async () => {
+        if (!cameraPermission) {
+            Alert.alert('Error', 'Se necesitan permisos de cámara');
+            return;
+        }
+        setCameraVisible(true);
+    };
+
+    const takePicture = async () => {
+        if (cameraRef) {
+            try {
+                const photo = await cameraRef.takePictureAsync({
+                    quality: 0.7,
+                    base64: true,
+                });
+                setCapturedPhoto(photo);
+                setCameraVisible(false);
+                setPhotoConfirmVisible(true);
+            } catch (error) {
+                console.error('Error tomando foto:', error);
+                Alert.alert('Error', 'No se pudo tomar la foto');
+            }
+        }
+    };
+
+    const savePhoto = () => {
+        if (capturedPhoto && clientForm.photos.length < 4) {
+            const newPhotos = [...clientForm.photos, capturedPhoto.base64];
+            setClientForm(prev => ({ ...prev, photos: newPhotos }));
+        }
+        setCapturedPhoto(null);
+        setPhotoConfirmVisible(false);
+    };
+
+    const retakePhoto = () => {
+        setCapturedPhoto(null);
+        setPhotoConfirmVisible(false);
+        setCameraVisible(true);
+    };
+
+    const removePhoto = (index) => {
+        const newPhotos = clientForm.photos.filter((_, i) => i !== index);
+        setClientForm(prev => ({ ...prev, photos: newPhotos }));
+    };
+
+    const openImageViewer = (images, startIndex = 0) => {
+        setViewingImages(images);
+        setSelectedImageIndex(startIndex);
+        setImageViewerVisible(true);
     };
 
     // Función para validar la cantidad (solo medias cajas y cajas completas)
@@ -291,6 +543,7 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
             location: clientForm.location,
             address: clientForm.address,
             status: "pending",
+            photos: clientForm.photos || [],
             createdAt: new Date().toISOString(),
         };
 
@@ -338,6 +591,7 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
             location: client.location,
             address: client.address,
             status: client.status,
+            photos: client.photos || [],
         });
         setEditModalVisible(true);
     };
@@ -381,6 +635,7 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
                     quantity: parseFloat(clientForm.quantity),
                     location: clientForm.location,
                     address: clientForm.address,
+                    photos: clientForm.photos || [],
                     updatedAt: new Date().toISOString(),
                 };
             }
@@ -561,6 +816,28 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
                 (${(item.quantity * eggsPrice * 12).toFixed(2)})
             </Text>
             <Text style={styles.clientAddress}>📍 {item.address}</Text>
+
+            {/* Mostrar fotos de referencia */}
+            {item.photos && item.photos.length > 0 && (
+                <View style={styles.photosContainer}>
+                    <Text style={styles.photosLabel}>📷 Fotografías de referencia:</Text>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.photosScrollView}>
+                        {item.photos.map((photo, photoIndex) => (
+                            <TouchableOpacity
+                                key={photoIndex}
+                                style={styles.photoThumbnail}
+                                onPress={() => openImageViewer(item.photos, photoIndex)}
+                            >
+                                <Image
+                                    source={{ uri: `data:image/jpeg;base64,${photo}` }}
+                                    style={styles.thumbnailImage}
+                                />
+                            </TouchableOpacity>
+                        ))}
+                    </ScrollView>
+                </View>
+            )}
+
             <Text style={styles.clientDate}>
                 Registrado: {formatDate(item.createdAt)} {formatTime(item.createdAt)}
             </Text>
@@ -714,6 +991,40 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
                             )}
                         </View>
 
+                        {/* Fotos de referencia */}
+                        <View style={styles.inputContainer}>
+                            <Text style={styles.inputLabel}>Fotos de referencia (opcional):</Text>
+                            <View style={styles.photosInputContainer}>
+                                <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                                    {clientForm.photos.map((photo, index) => (
+                                        <View key={index} style={styles.photoPreviewContainer}>
+                                            <Image
+                                                source={{ uri: `data:image/jpeg;base64,${photo}` }}
+                                                style={styles.photoPreview}
+                                            />
+                                            <TouchableOpacity
+                                                style={styles.removePhotoButton}
+                                                onPress={() => removePhoto(index)}
+                                            >
+                                                <Text style={styles.removePhotoText}>✕</Text>
+                                            </TouchableOpacity>
+                                        </View>
+                                    ))}
+                                    {clientForm.photos.length < 4 && (
+                                        <TouchableOpacity
+                                            style={styles.addPhotoButton}
+                                            onPress={openCamera}
+                                        >
+                                            <Text style={styles.addPhotoText}>+</Text>
+                                        </TouchableOpacity>
+                                    )}
+                                </ScrollView>
+                            </View>
+                            <Text style={styles.photoHelper}>
+                                Máximo 4 fotografías. Toque + para agregar.
+                            </Text>
+                        </View>
+
                         {/* Botones */}
                         <View style={styles.modalButtonsContainer}>
                             <TouchableOpacity
@@ -842,6 +1153,199 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
         </Modal>
     );
 
+    // Renderizar modal de confirmación de descarga
+    const renderOfflineDownloadModal = () => (
+        <Modal
+            animationType="slide"
+            transparent={true}
+            visible={offlineDownloadModalVisible}
+            onRequestClose={() => !isDownloading && setOfflineDownloadModalVisible(false)}
+        >
+            <View style={styles.modalOverlay}>
+                <View style={styles.modalContent}>
+                    <Text style={styles.modalTitle}>Descargar Mapa para Uso Offline</Text>
+
+                    {!isDownloading ? (
+                        <>
+                            <Text style={styles.modalText}>
+                                Está a punto de descargar el mapa para uso offline. Esto ocupará espacio en el almacenamiento de su dispositivo.
+                            </Text>
+                            <View style={styles.modalButtonsContainer}>
+                                <TouchableOpacity
+                                    style={[styles.modalButton, styles.cancelButton]}
+                                    onPress={() => setOfflineDownloadModalVisible(false)}
+                                >
+                                    <Text style={styles.modalButtonText}>Cancelar</Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity
+                                    style={[styles.modalButton, styles.addButton]}
+                                    onPress={downloadTilesWithProgress}
+                                >
+                                    <Text style={styles.modalButtonText}>Iniciar Descarga</Text>
+                                </TouchableOpacity>
+                            </View>
+                        </>
+                    ) : (
+                        <View style={styles.progressContainer}>
+                            <Text style={styles.progressText}>{downloadStatus}</Text>
+                            <Text style={styles.progressNumbers}>
+                                {downloadedTiles} / {totalTiles} tiles
+                            </Text>
+
+                            {/* Barra de progreso visual */}
+                            <View style={styles.progressBarContainer}>
+                                <View
+                                    style={[
+                                        styles.progressBarFill,
+                                        { width: `${Math.round(downloadProgress * 100)}%` }
+                                    ]}
+                                />
+                            </View>
+
+                            <Text style={styles.progressPercentage}>
+                                {Math.round(downloadProgress * 100)}%
+                            </Text>
+
+                            <ActivityIndicator
+                                size="large"
+                                color={COLORS.accent}
+                                style={styles.loadingIndicator}
+                            />
+                        </View>
+                    )}
+                </View>
+            </View>
+        </Modal>
+    );
+
+    // Renderizar modal de cámara
+    function renderCameraModal() {
+        return (
+            <Modal
+                animationType="slide"
+                transparent={false}
+                visible={cameraVisible}
+                onRequestClose={() => setCameraVisible(false)}
+            >
+                <View style={styles.cameraContainer}>
+                    <CameraView
+                        style={styles.camera}
+                        facing="back" // Cambiado de type a facing
+                        ref={setCameraRef}
+                    />
+                    <View style={styles.cameraButtonsContainer}>
+                        <TouchableOpacity
+                            style={styles.closeCameraButton}
+                            onPress={() => setCameraVisible(false)}
+                        >
+                            <Text style={styles.closeCameraText}>✕</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                            style={styles.captureButton}
+                            onPress={takePicture}
+                        >
+                            <View style={styles.captureButtonInner} />
+                        </TouchableOpacity>
+                    </View>
+                </View>
+            </Modal>
+        );
+    }
+
+    // Renderizar modal de confirmación de foto
+    function renderPhotoConfirmModal() {
+        return (
+            <Modal
+                animationType="slide"
+                transparent={true}
+                visible={photoConfirmVisible}
+                onRequestClose={() => setPhotoConfirmVisible(false)}
+            >
+                <View style={styles.photoConfirmOverlay}>
+                    <View style={styles.photoConfirmContent}>
+                        {capturedPhoto && (
+                            <Image
+                                source={{ uri: `data:image/jpeg;base64,${capturedPhoto.base64}` }}
+                                style={styles.photoPreviewLarge}
+                            />
+                        )}
+                        <View style={styles.photoConfirmButtons}>
+                            <TouchableOpacity
+                                style={[styles.modalButton, styles.cancelButton]}
+                                onPress={retakePhoto}
+                            >
+                                <Text style={styles.modalButtonText}>Tomar de nuevo</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                                style={[styles.modalButton, styles.addButton]}
+                                onPress={savePhoto}
+                            >
+                                <Text style={styles.modalButtonText}>Guardar</Text>
+                            </TouchableOpacity>
+                        </View>
+                    </View>
+                </View>
+            </Modal>
+        );
+    }
+
+    // Renderizar visor de imágenes en pantalla completa
+    function renderImageViewer() {
+        return (
+            <Modal
+                animationType="fade"
+                transparent={true}
+                visible={imageViewerVisible}
+                onRequestClose={() => setImageViewerVisible(false)}
+            >
+                <View style={styles.imageViewerOverlay}>
+                    <TouchableOpacity
+                        style={styles.closeImageViewer}
+                        onPress={() => setImageViewerVisible(false)}
+                    >
+                        <Text style={styles.closeImageViewerText}>✕</Text>
+                    </TouchableOpacity>
+
+                    <ScrollView
+                        horizontal
+                        pagingEnabled
+                        showsHorizontalScrollIndicator={false}
+                        onMomentumScrollEnd={(event) => {
+                            const index = Math.floor(event.nativeEvent.contentOffset.x / width);
+                            setSelectedImageIndex(index);
+                        }}
+                        contentOffset={{ x: selectedImageIndex * width, y: 0 }}
+                    >
+                        {viewingImages.map((image, index) => (
+                            <ScrollView
+                                key={index}
+                                style={styles.imageScrollView}
+                                minimumZoomScale={1}
+                                maximumZoomScale={3}
+                                showsVerticalScrollIndicator={false}
+                                showsHorizontalScrollIndicator={false}
+                            >
+                                <Image
+                                    source={{ uri: `data:image/jpeg;base64,${image}` }}
+                                    style={styles.fullScreenImage}
+                                    resizeMode="contain"
+                                />
+                            </ScrollView>
+                        ))}
+                    </ScrollView>
+
+                    {viewingImages.length > 1 && (
+                        <View style={styles.imageCounter}>
+                            <Text style={styles.imageCounterText}>
+                                {selectedImageIndex + 1} / {viewingImages.length}
+                            </Text>
+                        </View>
+                    )}
+                </View>
+            </Modal>
+        );
+    }
+
     // Función para centrar el mapa en un cliente específico
     const centerMapOnClient = (client) => {
         if (!showMap) {
@@ -878,7 +1382,6 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
                 showsVerticalScrollIndicator={false}
                 contentContainerStyle={styles.scrollContent}
             >
-                {/* Botón para mostrar mapa */}
                 {!showMap ? (
                     <View style={styles.mapPlaceholder}>
                         <Text style={styles.mapPlaceholderText}>
@@ -901,11 +1404,9 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
                         </TouchableOpacity>
                     </View>
                 ) : (
-                    /* Mapa de la ruta */
                     <View style={styles.mapContainer}>
                         <MapView
                             ref={(ref) => setMapRef(ref)}
-                            provider={PROVIDER_GOOGLE}
                             style={styles.map}
                             initialRegion={mapRegion}
                             showsUserLocation={true}
@@ -917,14 +1418,17 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
                             loadingEnabled={true}
                             loadingIndicatorColor={COLORS.accent}
                             loadingBackgroundColor={COLORS.background}
-                            onMapReady={() => {
-                                console.log('Mapa cargado correctamente');
-                            }}
-                            onError={(error) => {
-                                console.error('Error en el mapa:', error);
-                            }}
+                            onMapReady={() => console.log('Mapa cargado correctamente')}
+                            onError={(error) => console.error('Error en el mapa:', error)}
+                            onRegionChangeComplete={setMapRegion} // Actualiza la región al mover el mapa
                         >
-                            {/* Marcador para la ubicación del usuario */}
+                            {/* Usamos UrlTile para cargar tiles online u offline */}
+                            <UrlTile
+                                urlTemplate={isOfflineMode ? OFFLINE_TILE_URL : ONLINE_TILE_URL}
+                                maximumZ={19}
+                                flipY={false}
+                            />
+
                             {userLocation && (
                                 <Marker
                                     coordinate={userLocation}
@@ -933,7 +1437,6 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
                                 />
                             )}
 
-                            {/* Marcadores para clientes confirmados */}
                             {confirmedClients.filter(client => client.location).map(client => (
                                 <Marker
                                     key={`confirmed-${client.id}`}
@@ -947,7 +1450,6 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
                                 />
                             ))}
 
-                            {/* Marcadores para clientes pendientes */}
                             {pendingClients.filter(client => client.location).map(client => (
                                 <Marker
                                     key={`pending-${client.id}`}
@@ -961,7 +1463,6 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
                                 />
                             ))}
 
-                            {/* Polyline para la ruta */}
                             {generateRouteCoordinates().length > 1 && (
                                 <Polyline
                                     coordinates={generateRouteCoordinates()}
@@ -988,7 +1489,30 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
                     </View>
                 )}
 
-                {/* Resumen de la ruta */}
+                {/* Controles para el modo offline */}
+                {showMap && (
+                    <View style={styles.offlineControls}>
+                        <TouchableOpacity
+                            style={[styles.offlineButton, isOfflineMode && styles.offlineButtonActive]}
+                            onPress={() => setIsOfflineMode(!isOfflineMode)}
+                        >
+                            <Text style={styles.offlineButtonText}>
+                                {isOfflineMode ? "📶 Modo Online" : "📴 Modo Offline"}
+                            </Text>
+                        </TouchableOpacity>
+
+                        <TouchableOpacity
+                            style={[styles.downloadButton, isDownloading && styles.downloadButtonDisabled]}
+                            onPress={() => setOfflineDownloadModalVisible(true)}
+                            disabled={isDownloading}
+                        >
+                            <Text style={styles.downloadButtonText}>
+                                {isDownloading ? "⏳ Descargando..." : "💾 Descargar Mapa"}
+                            </Text>
+                        </TouchableOpacity>
+                    </View>
+                )}
+
                 <View style={styles.routeSummary}>
                     <Text style={styles.summaryTitle}>Resumen de Ruta</Text>
                     <View style={styles.summaryRow}>
@@ -1005,7 +1529,6 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
                     </Text>
                 </View>
 
-                {/* Navegación de pestañas de clientes */}
                 <View style={styles.clientTabContainer}>
                     <TouchableOpacity
                         style={[
@@ -1042,7 +1565,6 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
                     </TouchableOpacity>
                 </View>
 
-                {/* Botón para agregar cliente */}
                 <TouchableOpacity
                     style={styles.addClientButton}
                     onPress={() => setClientModalVisible(true)}
@@ -1050,12 +1572,9 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
                     <Text style={styles.addClientButtonText}>(+) Agregar Cliente</Text>
                 </TouchableOpacity>
 
-                {/* Lista de clientes renderizada directamente */}
                 <View style={styles.clientsContainer}>
                     {currentClients.length > 0 ? (
-                        currentClients.map((client, index) =>
-                            renderClientItem(client, index)
-                        )
+                        currentClients.map((client, index) => renderClientItem(client, index))
                     ) : (
                         <Text style={styles.noDataText}>
                             No hay clientes{" "}
@@ -1067,6 +1586,10 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
 
             {renderClientModal()}
             {renderEditModal()}
+            {renderOfflineDownloadModal()}
+            {renderCameraModal()}
+            {renderPhotoConfirmModal()}
+            {renderImageViewer()}
         </View>
     );
 };
@@ -1465,6 +1988,294 @@ const styles = StyleSheet.create({
         color: 'white',
         fontSize: 18,
         fontWeight: 'bold',
+    },
+    offlineDownloadButton: {
+        backgroundColor: COLORS.primary,
+        padding: 15,
+        marginHorizontal: 10,
+        borderRadius: 8,
+        alignItems: 'center',
+        marginBottom: 10,
+    },
+    offlineDownloadButtonText: {
+        color: COLORS.textLight,
+        fontSize: 16,
+        fontWeight: 'bold',
+    },
+    modalText: {
+        color: COLORS.text,
+        fontSize: 16,
+        marginBottom: 20,
+        textAlign: 'center',
+    },
+    progressBar: {
+        width: '100%',
+        height: 20,
+    },
+    progressContainer: {
+        alignItems: 'center',
+        paddingVertical: 20,
+    },
+    progressText: {
+        color: COLORS.text,
+        fontSize: 16,
+        textAlign: 'center',
+        marginBottom: 10,
+    },
+    progressNumbers: {
+        color: COLORS.textSecondary,
+        fontSize: 14,
+        marginBottom: 15,
+    },
+    progressBarContainer: {
+        width: '100%',
+        height: 8,
+        backgroundColor: COLORS.background,
+        borderRadius: 4,
+        marginBottom: 10,
+        overflow: 'hidden',
+    },
+    progressBarFill: {
+        height: '100%',
+        backgroundColor: COLORS.accent,
+        borderRadius: 4,
+    },
+    progressPercentage: {
+        color: COLORS.text,
+        fontSize: 18,
+        fontWeight: 'bold',
+        marginBottom: 15,
+    },
+    loadingIndicator: {
+        marginTop: 10,
+    },
+    offlineControls: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        paddingHorizontal: 15,
+        paddingVertical: 10,
+        backgroundColor: COLORS.card,
+        marginHorizontal: 10,
+        borderRadius: 8,
+        marginBottom: 10,
+        gap: 10,
+    },
+    offlineButton: {
+        flex: 1,
+        backgroundColor: COLORS.background,
+        paddingVertical: 12,
+        paddingHorizontal: 16,
+        borderRadius: 8,
+        alignItems: 'center',
+        borderWidth: 1,
+        borderColor: COLORS.border,
+    },
+    offlineButtonActive: {
+        backgroundColor: COLORS.accent,
+        borderColor: COLORS.accent,
+    },
+    offlineButtonText: {
+        color: COLORS.text,
+        fontSize: 14,
+        fontWeight: 'bold',
+    },
+    downloadButton: {
+        flex: 1,
+        backgroundColor: COLORS.secondary,
+        paddingVertical: 12,
+        paddingHorizontal: 16,
+        borderRadius: 8,
+        alignItems: 'center',
+    },
+    downloadButtonDisabled: {
+        backgroundColor: COLORS.textSecondary,
+        opacity: 0.6,
+    },
+    downloadButtonText: {
+        color: COLORS.text,
+        fontSize: 14,
+        fontWeight: 'bold',
+    },
+    photosContainer: {
+        marginVertical: 8,
+    },
+    photosLabel: {
+        fontSize: 14,
+        color: COLORS.text,
+        marginBottom: 5,
+        fontWeight: '500',
+    },
+    photosScrollView: {
+        flexDirection: 'row',
+    },
+    photoThumbnail: {
+        marginRight: 8,
+    },
+    thumbnailImage: {
+        width: 60,
+        height: 60,
+        borderRadius: 8,
+        backgroundColor: COLORS.lightGray,
+    },
+
+    // Estilos para input de fotos
+    photosInputContainer: {
+        marginTop: 8,
+    },
+    photoPreviewContainer: {
+        position: 'relative',
+        marginRight: 10,
+    },
+    photoPreview: {
+        width: 80,
+        height: 80,
+        borderRadius: 8,
+        backgroundColor: COLORS.lightGray,
+    },
+    removePhotoButton: {
+        position: 'absolute',
+        top: -5,
+        right: -5,
+        backgroundColor: COLORS.error,
+        borderRadius: 12,
+        width: 24,
+        height: 24,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    removePhotoText: {
+        color: 'white',
+        fontSize: 12,
+        fontWeight: 'bold',
+    },
+    addPhotoButton: {
+        width: 80,
+        height: 80,
+        borderRadius: 8,
+        borderWidth: 2,
+        borderColor: COLORS.accent,
+        borderStyle: 'dashed',
+        justifyContent: 'center',
+        alignItems: 'center',
+        backgroundColor: COLORS.background,
+    },
+    addPhotoText: {
+        fontSize: 30,
+        color: COLORS.accent,
+        fontWeight: '300',
+    },
+    photoHelper: {
+        fontSize: 12,
+        color: COLORS.textSecondary,
+        marginTop: 5,
+        fontStyle: 'italic',
+    },
+
+    // Estilos para cámara
+    cameraContainer: {
+        flex: 1,
+        position: 'relative',
+    },
+    camera: {
+        flex: 1,
+    },
+    cameraButtonsContainer: {
+        position: 'absolute',
+        bottom: 20,
+        left: 0,
+        right: 0,
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        paddingHorizontal: 20,
+    },
+    closeCameraButton: {
+        backgroundColor: 'rgba(0, 0, 0, 0.5)',
+        padding: 10,
+        borderRadius: 5,
+    },
+    closeCameraText: {
+        color: 'white',
+        fontSize: 18,
+    },
+    captureButton: {
+        width: 60,
+        height: 60,
+        borderRadius: 30,
+        backgroundColor: 'rgba(255, 255, 255, 0.3)',
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    captureButtonInner: {
+        width: 50,
+        height: 50,
+        borderRadius: 25,
+        backgroundColor: 'white',
+    },
+    photoConfirmOverlay: {
+        flex: 1,
+        backgroundColor: 'rgba(0,0,0,0.9)',
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    photoConfirmContent: {
+        width: width * 0.9,
+        alignItems: 'center',
+    },
+    photoPreviewLarge: {
+        width: width * 0.8,
+        height: height * 0.6,
+        borderRadius: 10,
+        marginBottom: 20,
+    },
+    photoConfirmButtons: {
+        flexDirection: 'row',
+        justifyContent: 'space-around',
+        width: '100%',
+    },
+
+    // Estilos para visor de imágenes
+    imageViewerOverlay: {
+        flex: 1,
+        backgroundColor: 'black',
+    },
+    closeImageViewer: {
+        position: 'absolute',
+        top: 50,
+        right: 20,
+        zIndex: 1,
+        backgroundColor: 'rgba(255,255,255,0.2)',
+        borderRadius: 25,
+        width: 50,
+        height: 50,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    closeImageViewerText: {
+        color: 'white',
+        fontSize: 20,
+        fontWeight: 'bold',
+    },
+    imageScrollView: {
+        width: width,
+        height: height,
+    },
+    fullScreenImage: {
+        width: width,
+        height: height,
+    },
+    imageCounter: {
+        position: 'absolute',
+        bottom: 50,
+        alignSelf: 'center',
+        backgroundColor: 'rgba(0,0,0,0.7)',
+        paddingHorizontal: 15,
+        paddingVertical: 8,
+        borderRadius: 20,
+    },
+    imageCounterText: {
+        color: 'white',
+        fontSize: 16,
+        fontWeight: '500',
     },
 });
 

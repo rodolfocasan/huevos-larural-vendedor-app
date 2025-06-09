@@ -3,10 +3,10 @@ import React, { useState, useEffect } from 'react';
 import { View, StatusBar, SafeAreaView, StyleSheet, Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-import { COLORS } from './Components/Utils/Constants';
-
 import Header from './Components/Home/Header.js';
 import SalesContainer from './Components/Home/SalesContainer';
+
+import { COLORS } from './Components/Utils/Constants';
 
 
 
@@ -93,11 +93,30 @@ export default function App() {
     }
   };
 
-  // Función asíncrona para cargar las ventas desde AsyncStorage
+  // Tamaño máximo por fragmento (1MB)
+  const CHUNK_SIZE = 1000000;
+
+  // Función para dividir los datos en fragmentos
+  const splitIntoChunks = (data, chunkSize) => {
+    const stringData = JSON.stringify(data);
+    const chunks = [];
+    for (let i = 0; i < stringData.length; i += chunkSize) {
+      chunks.push(stringData.slice(i, i + chunkSize));
+    }
+    return chunks;
+  };
+
+  // Función para recombinar los fragmentos en los datos originales
+  const combineChunks = (chunks) => {
+    const combinedString = chunks.join('');
+    return JSON.parse(combinedString);
+  };
+
+  // Función asíncrona para cargar las ventas desde AsyncStorage, recombinando los fragmentos
   const loadSales = async () => {
     try {
       const keys = await AsyncStorage.getAllKeys();
-      const saleKeys = keys.filter(key => key.startsWith('@sale_'));
+      const saleKeys = keys.filter(key => key.startsWith('@sale_') && key.endsWith('_chunks'));
 
       if (saleKeys.length === 0) {
         // Crear la primera venta si no existen ventas
@@ -112,24 +131,36 @@ export default function App() {
         setSales([firstSale]);
         setCurrentSaleId('1');
       } else {
-        const salesData = await AsyncStorage.multiGet(saleKeys);
-        const parsedSales = salesData.map(([key, value]) => JSON.parse(value))
-          .sort((a, b) => parseInt(a.id) - parseInt(b.id));
-
-        setSales(parsedSales);
-
-        // Seleccionar la última venta por defecto en lugar de la primera
-        setCurrentSaleId(parsedSales[parsedSales.length - 1].id);
+        const sales = [];
+        for (const chunkKey of saleKeys) {
+          const saleId = chunkKey.split('_')[1];
+          const chunksCount = parseInt(await AsyncStorage.getItem(chunkKey));
+          const chunks = [];
+          for (let i = 0; i < chunksCount; i++) {
+            const chunk = await AsyncStorage.getItem(`@sale_${saleId}_chunk_${i}`);
+            chunks.push(chunk);
+          }
+          const saleData = combineChunks(chunks);
+          sales.push(saleData);
+        }
+        const sortedSales = sales.sort((a, b) => parseInt(a.id) - parseInt(b.id));
+        setSales(sortedSales);
+        setCurrentSaleId(sortedSales[sortedSales.length - 1].id);
       }
     } catch (e) {
       console.error('No se pudieron cargar las ventas:', e);
     }
   };
 
-  // Función asíncrona para guardar una venta en AsyncStorage
+  // Función asíncrona para guardar una venta en AsyncStorage, dividiendo en fragmentos si es necesario
   const saveSale = async (sale) => {
     try {
-      await AsyncStorage.setItem(`@sale_${sale.id}`, JSON.stringify(sale));
+      const saleKey = `@sale_${sale.id}`;
+      const chunks = splitIntoChunks(sale, CHUNK_SIZE);
+      await AsyncStorage.setItem(`${saleKey}_chunks`, chunks.length.toString());
+      for (let i = 0; i < chunks.length; i++) {
+        await AsyncStorage.setItem(`${saleKey}_chunk_${i}`, chunks[i]);
+      }
     } catch (e) {
       console.error('No se pudo guardar la venta:', e);
     }
