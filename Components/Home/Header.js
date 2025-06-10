@@ -1,6 +1,8 @@
 // Components/Home/Header.js
-import React, { useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Modal, TextInput, FlatList, Platform, SafeAreaView } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { View, Text, TouchableOpacity, StyleSheet, Modal, TextInput, FlatList, Platform, SafeAreaView, Alert } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { COLORS } from '../Utils/Constants';
 
@@ -10,14 +12,54 @@ import { COLORS } from '../Utils/Constants';
 
 // Componente Header que maneja el encabezado de la aplicación
 const Header = ({ sales, currentSaleId, setCurrentSaleId, createNewSale, eggsPrice, saveEggsPrice }) => {
+    // Obtener las dimensiones del área segura del dispositivo
+    const insets = useSafeAreaInsets();
+
     // Estado para controlar la visibilidad del menú de ventas
     const [menuVisible, setMenuVisible] = useState(false);
 
     // Estado para controlar la visibilidad del modal de configuración
     const [settingsVisible, setSettingsVisible] = useState(false);
 
-    // Estado temporal para el precio de los cartones de huevos
-    const [tempEggsPrice, setTempEggsPrice] = useState(eggsPrice.toString());
+    // Estado para controlar la visibilidad del submenú de precios
+    const [priceMenuVisible, setPriceMenuVisible] = useState(false);
+
+    // Estado para las opciones de precio personalizadas
+    const [priceOptions, setPriceOptions] = useState([4.00]);
+
+    // Estado temporal para agregar nuevo precio
+    const [newPriceInput, setNewPriceInput] = useState('');
+
+    // Estado para mostrar el campo de agregar precio
+    const [showAddPrice, setShowAddPrice] = useState(false);
+
+    // Cargar opciones de precio al inicializar el componente
+    useEffect(() => {
+        loadPriceOptions();
+    }, []);
+
+    // Función para cargar las opciones de precio desde AsyncStorage
+    const loadPriceOptions = async () => {
+        try {
+            const storedOptions = await AsyncStorage.getItem('@price_options');
+            if (storedOptions !== null) {
+                const parsedOptions = JSON.parse(storedOptions);
+                setPriceOptions(parsedOptions);
+            }
+        } catch (e) {
+            console.error('No se pudo cargar las opciones de precio:', e);
+        }
+    };
+
+    // Función para guardar las opciones de precio en AsyncStorage
+    const savePriceOptions = async (options) => {
+        try {
+            await AsyncStorage.setItem('@price_options', JSON.stringify(options));
+            setPriceOptions(options);
+        } catch (e) {
+            console.error('No se pudo guardar las opciones de precio:', e);
+        }
+    };
 
     // Función para alternar la visibilidad del menú de ventas
     const toggleMenu = () => setMenuVisible(!menuVisible);
@@ -26,35 +68,89 @@ const Header = ({ sales, currentSaleId, setCurrentSaleId, createNewSale, eggsPri
     const toggleSettings = () => {
         setSettingsVisible(!settingsVisible);
         if (settingsVisible) {
-            setTempEggsPrice(eggsPrice.toString());
+            setPriceMenuVisible(false);
+            setShowAddPrice(false);
+            setNewPriceInput('');
         }
     };
 
-    // Función para guardar el nuevo precio de los cartones de huevos
-    const handleSavePrice = () => {
-        const newPrice = parseFloat(tempEggsPrice);
-        if (!isNaN(newPrice) && newPrice > 0) {
-            saveEggsPrice(newPrice);
+    // Función para alternar el submenú de precios
+    const togglePriceMenu = () => {
+        setPriceMenuVisible(!priceMenuVisible);
+        setShowAddPrice(false);
+        setNewPriceInput('');
+    };
+
+    // Función para seleccionar un precio de las opciones
+    const selectPrice = (price) => {
+        saveEggsPrice(price);
+        setPriceMenuVisible(false);
+    };
+
+    // Función para eliminar una opción de precio
+    const removePriceOption = (priceToRemove) => {
+        if (priceOptions.length <= 1) {
+            Alert.alert('Error', 'Debe mantener al menos una opción de precio');
+            return;
         }
-        toggleSettings();
+
+        Alert.alert(
+            'Confirmar eliminación',
+            `¿Desea eliminar la opción de precio $${priceToRemove.toFixed(2)}?`,
+            [
+                { text: 'Cancelar', style: 'cancel' },
+                {
+                    text: 'Eliminar',
+                    style: 'destructive',
+                    onPress: () => {
+                        const updatedOptions = priceOptions.filter(price => price !== priceToRemove);
+                        savePriceOptions(updatedOptions);
+
+                        // Si el precio eliminado era el actual, cambiar al primero disponible
+                        if (eggsPrice === priceToRemove && updatedOptions.length > 0) {
+                            saveEggsPrice(updatedOptions[0]);
+                        }
+                    }
+                }
+            ]
+        );
+    };
+
+    // Función para agregar una nueva opción de precio
+    const addPriceOption = () => {
+        const newPrice = parseFloat(newPriceInput);
+        if (isNaN(newPrice) || newPrice <= 0) {
+            Alert.alert('Error', 'Ingrese un precio válido');
+            return;
+        }
+
+        if (priceOptions.includes(newPrice)) {
+            Alert.alert('Error', 'Esta opción de precio ya existe');
+            return;
+        }
+
+        const updatedOptions = [...priceOptions, newPrice].sort((a, b) => a - b);
+        savePriceOptions(updatedOptions);
+        setNewPriceInput('');
+        setShowAddPrice(false);
     };
 
     // Obtener el nombre de la venta actual
     const currentSaleName = sales.find(sale => sale.id === currentSaleId)?.name || 'Cargando...';
 
     return (
-        <View style={styles.header}>
-            {/* Contenedor izquierdo para el botón de configuración */}
+        <View style={[styles.header, { paddingTop: insets.top + 15 }]}>
+            {/* Contenedor izquierdo para el botón hamburguesa */}
             <View style={styles.leftContainer}>
-                {/* Botón para abrir el modal de configuración */}
-                <TouchableOpacity style={styles.settingsButton} onPress={toggleSettings}>
-                    <Text style={styles.settingsIcon}>Precio</Text>
+                <TouchableOpacity style={styles.hamburgerButton} onPress={toggleSettings}>
+                    <View style={styles.hamburgerLine} />
+                    <View style={styles.hamburgerLine} />
+                    <View style={styles.hamburgerLine} />
                 </TouchableOpacity>
             </View>
 
             {/* Contenedor derecho para el menú de ventas */}
             <View style={styles.rightContainer}>
-                {/* Botón para abrir el menú de ventas */}
                 <TouchableOpacity style={styles.menuButton} onPress={toggleMenu}>
                     <Text style={styles.currentSaleName}>{currentSaleName} ▼</Text>
                 </TouchableOpacity>
@@ -67,22 +163,23 @@ const Header = ({ sales, currentSaleId, setCurrentSaleId, createNewSale, eggsPri
                 visible={menuVisible}
                 onRequestClose={() => setMenuVisible(false)}
             >
-                {/* Overlay para cerrar el modal al tocar fuera */}
-                <TouchableOpacity
-                    style={styles.modalOverlay}
-                    activeOpacity={1}
-                    onPress={() => setMenuVisible(false)}
-                >
-                    {/* Contenido del modal */}
+                <View style={styles.modalOverlay}>
                     <SafeAreaView style={styles.safeModalContainer}>
                         <View style={styles.modalContent}>
-                            <Text style={styles.modalTitle}>Ventas</Text>
-                            {/* Lista de ventas disponibles */}
+                            {/* Header del modal con botón X */}
+                            <View style={styles.modalHeader}>
+                                <Text style={styles.modalTitle}>Ventas</Text>
+                                <TouchableOpacity
+                                    style={styles.closeButton}
+                                    onPress={() => setMenuVisible(false)}
+                                >
+                                    <Text style={styles.closeButtonText}>×</Text>
+                                </TouchableOpacity>
+                            </View>
                             <FlatList
                                 data={sales}
                                 keyExtractor={(item) => item.id}
                                 renderItem={({ item }) => (
-                                    /* Elemento de la lista para cada venta */
                                     <TouchableOpacity
                                         style={[
                                             styles.saleItem,
@@ -104,7 +201,6 @@ const Header = ({ sales, currentSaleId, setCurrentSaleId, createNewSale, eggsPri
                                     </TouchableOpacity>
                                 )}
                             />
-                            {/* Botón para crear una nueva venta */}
                             <TouchableOpacity
                                 style={styles.newSaleButton}
                                 onPress={() => {
@@ -116,7 +212,7 @@ const Header = ({ sales, currentSaleId, setCurrentSaleId, createNewSale, eggsPri
                             </TouchableOpacity>
                         </View>
                     </SafeAreaView>
-                </TouchableOpacity>
+                </View>
             </Modal>
 
             {/* Modal de configuración */}
@@ -126,47 +222,124 @@ const Header = ({ sales, currentSaleId, setCurrentSaleId, createNewSale, eggsPri
                 visible={settingsVisible}
                 onRequestClose={() => setSettingsVisible(false)}
             >
-                {/* Overlay para cerrar el modal al tocar fuera */}
-                <TouchableOpacity
-                    style={styles.modalOverlay}
-                    activeOpacity={1}
-                    onPress={() => setSettingsVisible(false)}
-                >
-                    {/* Contenido del modal de configuración */}
+                <View style={styles.modalOverlay}>
                     <SafeAreaView style={styles.safeModalContainer}>
                         <View style={styles.settingsModalContent}>
-                            <Text style={styles.modalTitle}>Configuración</Text>
-
-                            {/* Campo para editar el precio por cartón */}
-                            <View style={styles.settingItem}>
-                                <Text style={styles.settingLabel}>Precio por cartón ($):</Text>
-                                <TextInput
-                                    style={styles.priceInput}
-                                    value={tempEggsPrice}
-                                    onChangeText={setTempEggsPrice}
-                                    keyboardType="numeric"
-                                    placeholderTextColor={COLORS.textSecondary}
-                                />
+                            {/* Header del modal con botón X */}
+                            <View style={styles.modalHeader}>
+                                <Text style={styles.modalTitle}>Configuración</Text>
+                                <TouchableOpacity
+                                    style={styles.closeButton}
+                                    onPress={toggleSettings}
+                                >
+                                    <Text style={styles.closeButtonText}>×</Text>
+                                </TouchableOpacity>
                             </View>
 
-                            {/* Campo calculado para el precio por caja */}
-                            <View style={styles.settingItem}>
-                                <Text style={styles.settingLabel}>Precio por caja ($):</Text>
-                                <Text style={styles.calculatedPrice}>
-                                    ${(parseFloat(tempEggsPrice) * 12).toFixed(2)}
-                                </Text>
+                            {/* Sección N° de Venta */}
+                            <View style={styles.settingSection}>
+                                <Text style={styles.sectionTitle}>N° de Venta:</Text>
+                                <View style={styles.sectionContent}>
+                                    <Text style={styles.sectionValue}>{currentSaleName}</Text>
+                                </View>
                             </View>
 
-                            {/* Botón para guardar los cambios */}
-                            <TouchableOpacity
-                                style={styles.saveButton}
-                                onPress={handleSavePrice}
-                            >
-                                <Text style={styles.saveButtonText}>Guardar</Text>
-                            </TouchableOpacity>
+                            {/* Separador */}
+                            <View style={styles.separator} />
+
+                            {/* Sección Precio de venta */}
+                            <View style={styles.settingSection}>
+                                <Text style={styles.sectionTitle}>Precio de venta:</Text>
+
+                                {/* Botón para mostrar/ocultar opciones de precio */}
+                                <TouchableOpacity
+                                    style={styles.priceButton}
+                                    onPress={togglePriceMenu}
+                                >
+                                    <Text style={styles.priceButtonText}>
+                                        ${eggsPrice.toFixed(2)} {priceMenuVisible ? '▲' : '▼'}
+                                    </Text>
+                                </TouchableOpacity>
+
+                                {/* Submenú de opciones de precio */}
+                                {priceMenuVisible && (
+                                    <View style={styles.priceOptionsContainer}>
+                                        {priceOptions.map((price, index) => (
+                                            <View key={index} style={styles.priceOptionRow}>
+                                                <TouchableOpacity
+                                                    style={[
+                                                        styles.priceOption,
+                                                        eggsPrice === price && styles.selectedPriceOption
+                                                    ]}
+                                                    onPress={() => selectPrice(price)}
+                                                >
+                                                    <Text style={[
+                                                        styles.priceOptionText,
+                                                        eggsPrice === price && styles.selectedPriceOptionText
+                                                    ]}>
+                                                        ${price.toFixed(2)}
+                                                    </Text>
+                                                </TouchableOpacity>
+
+                                                {/* Botón X para eliminar opción */}
+                                                <TouchableOpacity
+                                                    style={styles.removeButton}
+                                                    onPress={() => removePriceOption(price)}
+                                                >
+                                                    <Text style={styles.removeButtonText}>×</Text>
+                                                </TouchableOpacity>
+                                            </View>
+                                        ))}
+
+                                        {/* Botón para agregar nueva opción */}
+                                        {!showAddPrice ? (
+                                            <TouchableOpacity
+                                                style={styles.addPriceButton}
+                                                onPress={() => setShowAddPrice(true)}
+                                            >
+                                                <Text style={styles.addPriceButtonText}>+ Agregar precio</Text>
+                                            </TouchableOpacity>
+                                        ) : (
+                                            <View style={styles.addPriceContainer}>
+                                                <TextInput
+                                                    style={styles.newPriceInput}
+                                                    value={newPriceInput}
+                                                    onChangeText={setNewPriceInput}
+                                                    placeholder="Nuevo precio"
+                                                    placeholderTextColor={COLORS.textSecondary}
+                                                    keyboardType="numeric"
+                                                />
+                                                <TouchableOpacity
+                                                    style={styles.confirmAddButton}
+                                                    onPress={addPriceOption}
+                                                >
+                                                    <Text style={styles.confirmAddButtonText}>✓</Text>
+                                                </TouchableOpacity>
+                                                <TouchableOpacity
+                                                    style={styles.cancelAddButton}
+                                                    onPress={() => {
+                                                        setShowAddPrice(false);
+                                                        setNewPriceInput('');
+                                                    }}
+                                                >
+                                                    <Text style={styles.cancelAddButtonText}>×</Text>
+                                                </TouchableOpacity>
+                                            </View>
+                                        )}
+                                    </View>
+                                )}
+
+                                {/* Precio por caja calculado */}
+                                <View style={styles.calculatedContainer}>
+                                    <Text style={styles.calculatedLabel}>Precio por caja:</Text>
+                                    <Text style={styles.calculatedPrice}>
+                                        ${(eggsPrice * 12).toFixed(2)}
+                                    </Text>
+                                </View>
+                            </View>
                         </View>
                     </SafeAreaView>
-                </TouchableOpacity>
+                </View>
             </Modal>
         </View>
     );
@@ -178,11 +351,10 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
-        paddingVertical: 15,
+        paddingBottom: 15, // Solo padding inferior, el superior se maneja dinámicamente
         paddingHorizontal: 20,
         elevation: 4,
-        // Asegurar que el header tenga una altura adecuada para evitar problemas con el notch
-        paddingTop: Platform.OS === 'ios' ? 10 : 15,
+        // Removido paddingTop fijo para usar el dinámico con insets
     },
     leftContainer: {
         flex: 0,
@@ -191,6 +363,23 @@ const styles = StyleSheet.create({
     rightContainer: {
         flex: 1,
         alignItems: 'flex-end',
+    },
+    // Estilos del botón hamburguesa
+    hamburgerButton: {
+        padding: 12,
+        borderRadius: 8,
+        backgroundColor: COLORS.accent,
+        width: 44,
+        height: 40,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    hamburgerLine: {
+        width: 20,
+        height: 2.5,
+        backgroundColor: COLORS.text,
+        marginVertical: 1.5,
+        borderRadius: 1.25,
     },
     menuButton: {
         padding: 10,
@@ -204,19 +393,6 @@ const styles = StyleSheet.create({
         color: COLORS.text,
         fontSize: 14,
         fontWeight: '800',
-    },
-    settingsButton: {
-        paddingHorizontal: 15,
-        paddingVertical: 10,
-        borderRadius: 5,
-        backgroundColor: COLORS.accent,
-        height: 40,
-        justifyContent: 'center',
-    },
-    settingsIcon: {
-        fontSize: 14,
-        color: COLORS.text,
-        fontWeight: 'bold',
     },
     modalOverlay: {
         flex: 1,
@@ -238,18 +414,201 @@ const styles = StyleSheet.create({
         maxHeight: '70%',
     },
     settingsModalContent: {
-        width: '80%',
+        width: '85%',
         backgroundColor: COLORS.card,
-        borderRadius: 10,
-        padding: 20,
+        borderRadius: 12,
+        padding: 24,
+        maxHeight: '80%',
     },
     modalTitle: {
-        fontSize: 18,
+        fontSize: 20,
         fontWeight: 'bold',
         color: COLORS.text,
-        marginBottom: 15,
+        flex: 1,
+    },
+    // Estilos del modal
+    modalHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: 20,
+        paddingBottom: 12,
+        borderBottomWidth: 1,
+        borderBottomColor: COLORS.textSecondary + '30',
+    },
+    closeButton: {
+        backgroundColor: COLORS.error || '#FF6B6B',
+        borderRadius: 20,
+        width: 32,
+        height: 32,
+        justifyContent: 'center',
+        alignItems: 'center',
+        marginLeft: 16,
+    },
+    closeButtonText: {
+        color: 'white',
+        fontSize: 20,
+        fontWeight: 'bold',
+        lineHeight: 22,
+    },
+    // Estilos de las secciones de configuración
+    settingSection: {
+        marginBottom: 20,
+    },
+    sectionTitle: {
+        fontSize: 16,
+        fontWeight: '600',
+        color: COLORS.text,
+        marginBottom: 12,
+    },
+    sectionContent: {
+        backgroundColor: COLORS.background,
+        borderRadius: 8,
+        padding: 12,
+    },
+    sectionValue: {
+        fontSize: 16,
+        color: COLORS.text,
+        fontWeight: '500',
+    },
+    separator: {
+        height: 1,
+        backgroundColor: COLORS.textSecondary + '30',
+        marginVertical: 16,
+    },
+    // Estilos del botón de precio
+    priceButton: {
+        backgroundColor: COLORS.background,
+        borderRadius: 8,
+        padding: 12,
+        marginBottom: 12,
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+    },
+    priceButtonText: {
+        fontSize: 16,
+        color: COLORS.text,
+        fontWeight: '600',
+    },
+    // Estilos del contenedor de opciones de precio
+    priceOptionsContainer: {
+        backgroundColor: COLORS.background,
+        borderRadius: 8,
+        padding: 8,
+        marginBottom: 12,
+    },
+    priceOptionRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginBottom: 6,
+    },
+    priceOption: {
+        flex: 1,
+        backgroundColor: COLORS.card,
+        borderRadius: 6,
+        padding: 10,
+        marginRight: 8,
+    },
+    selectedPriceOption: {
+        backgroundColor: COLORS.accent,
+    },
+    priceOptionText: {
+        fontSize: 15,
+        color: COLORS.text,
         textAlign: 'center',
     },
+    selectedPriceOptionText: {
+        fontWeight: 'bold',
+    },
+    removeButton: {
+        backgroundColor: COLORS.error || '#FF6B6B',
+        borderRadius: 15,
+        width: 24,
+        height: 24,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    removeButtonText: {
+        color: 'white',
+        fontSize: 16,
+        fontWeight: 'bold',
+        lineHeight: 18,
+    },
+    // Estilos para agregar precio
+    addPriceButton: {
+        backgroundColor: COLORS.success,
+        borderRadius: 6,
+        padding: 10,
+        alignItems: 'center',
+        marginTop: 6,
+    },
+    addPriceButtonText: {
+        color: COLORS.text,
+        fontSize: 14,
+        fontWeight: '600',
+    },
+    addPriceContainer: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginTop: 6,
+    },
+    newPriceInput: {
+        flex: 1,
+        backgroundColor: COLORS.card,
+        borderRadius: 6,
+        padding: 10,
+        marginRight: 8,
+        color: COLORS.text,
+        fontSize: 15,
+    },
+    confirmAddButton: {
+        backgroundColor: COLORS.success,
+        borderRadius: 15,
+        width: 30,
+        height: 30,
+        justifyContent: 'center',
+        alignItems: 'center',
+        marginRight: 6,
+    },
+    confirmAddButtonText: {
+        color: COLORS.text,
+        fontSize: 16,
+        fontWeight: 'bold',
+    },
+    cancelAddButton: {
+        backgroundColor: COLORS.error || '#FF6B6B',
+        borderRadius: 15,
+        width: 30,
+        height: 30,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    cancelAddButtonText: {
+        color: 'white',
+        fontSize: 18,
+        fontWeight: 'bold',
+        lineHeight: 20,
+    },
+    // Estilos del precio calculado
+    calculatedContainer: {
+        backgroundColor: COLORS.background,
+        borderRadius: 8,
+        padding: 12,
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+    },
+    calculatedLabel: {
+        fontSize: 15,
+        color: COLORS.textSecondary,
+    },
+    calculatedPrice: {
+        fontSize: 16,
+        color: COLORS.text,
+        fontWeight: 'bold',
+    },
+    // Estilos del menú de ventas (mantener los existentes)
     saleItem: {
         paddingVertical: 12,
         paddingHorizontal: 15,
@@ -275,44 +634,6 @@ const styles = StyleSheet.create({
         alignItems: 'center',
     },
     newSaleButtonText: {
-        color: COLORS.text,
-        fontWeight: 'bold',
-    },
-    settingItem: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        marginBottom: 15,
-    },
-    settingLabel: {
-        color: COLORS.text,
-        fontSize: 16,
-        flex: 1,
-    },
-    priceInput: {
-        backgroundColor: COLORS.background,
-        color: COLORS.text,
-        borderRadius: 5,
-        paddingHorizontal: 10,
-        paddingVertical: 8,
-        width: 100,
-        textAlign: 'right',
-    },
-    calculatedPrice: {
-        color: COLORS.text,
-        fontSize: 16,
-        width: 100,
-        textAlign: 'right',
-        fontWeight: 'bold',
-    },
-    saveButton: {
-        backgroundColor: COLORS.success,
-        paddingVertical: 12,
-        borderRadius: 5,
-        alignItems: 'center',
-        marginTop: 10,
-    },
-    saveButtonText: {
         color: COLORS.text,
         fontWeight: 'bold',
     },

@@ -2,6 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { View, StatusBar, SafeAreaView, StyleSheet, Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import Header from './Components/Home/Header.js';
 import SalesContainer from './Components/Home/SalesContainer';
@@ -205,25 +206,27 @@ export default function App() {
   return (
     <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
       <StatusBar barStyle="light-content" backgroundColor={COLORS.primary} />
-      <View style={styles.contentContainer}>
-        <Header
-          sales={sales}
-          currentSaleId={currentSaleId}
-          setCurrentSaleId={setCurrentSaleId}
-          createNewSale={createNewSale}
-          eggsPrice={eggsPrice}
-          saveEggsPrice={saveEggsPrice}
-        />
-        <SalesContainer
-          sale={currentSale}
-          updateSale={updateSale}
-          eggsPrice={eggsPrice}
-          locations={locations}
-          currentLocation={currentLocation}
-          setCurrentLocation={setCurrentLocation}
-          addLocation={addLocation}
-        />
-      </View>
+      <SafeAreaProvider>
+        <View style={styles.contentContainer}>
+          <Header
+            sales={sales}
+            currentSaleId={currentSaleId}
+            setCurrentSaleId={setCurrentSaleId}
+            createNewSale={createNewSale}
+            eggsPrice={eggsPrice}
+            saveEggsPrice={saveEggsPrice}
+          />
+          <SalesContainer
+            sale={currentSale}
+            updateSale={updateSale}
+            eggsPrice={eggsPrice}
+            locations={locations}
+            currentLocation={currentLocation}
+            setCurrentLocation={setCurrentLocation}
+            addLocation={addLocation}
+          />
+        </View>
+      </SafeAreaProvider>
     </SafeAreaView>
   );
 }
