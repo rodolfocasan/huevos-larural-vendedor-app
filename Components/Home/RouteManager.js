@@ -18,7 +18,7 @@ import * as Location from "expo-location";
 import MapView, { Marker, Polyline, UrlTile } from 'react-native-maps';
 import * as FileSystem from 'expo-file-system';
 import { CameraView, CameraType, Camera } from 'expo-camera';
-
+import NetInfo from '@react-native-community/netinfo';
 
 import { COLORS, formatTime, formatDate } from "../Utils/Constants";
 
@@ -45,8 +45,12 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
     const [isLoadingLocation, setIsLoadingLocation] = useState(false);
     const [showMap, setShowMap] = useState(false);
     const [gpsEnabled, setGpsEnabled] = useState(false);
+    const [manualLocationModalVisible, setManualLocationModalVisible] = useState(false);
+    const [selectedLocation, setSelectedLocation] = useState(null);
 
     // Estados para el mapa
+    const [mapType, setMapType] = useState('standard');
+    const [manualMapType, setManualMapType] = useState('standard');
     const [mapRegion, setMapRegion] = useState({
         latitude: 14.0723, // Coordenadas por defecto (El Salvador)
         longitude: -87.1921,
@@ -54,6 +58,7 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
         longitudeDelta: 0.05,
     });
     const [userLocation, setUserLocation] = useState(null);
+    const [hasInitializedMapRegion, setHasInitializedMapRegion] = useState(false);
     const [isTrackingLocation, setIsTrackingLocation] = useState(false);
     const [mapRef, setMapRef] = useState(null); // Agregar referencia al mapa
 
@@ -80,6 +85,7 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
 
     // Estados para la funcionalidad offline
     const [isOfflineMode, setIsOfflineMode] = useState(false); // Controla el modo online/offline
+    const [isConnected, setIsConnected] = useState(true); // Estado de conectividad
 
     // Estados para la descarga offline
     const [offlineDownloadModalVisible, setOfflineDownloadModalVisible] = useState(false);
@@ -141,6 +147,22 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
     useEffect(() => {
         checkGPSAndPermissions();
         requestCameraPermissions();
+
+        // Suscribirse a cambios de conectividad
+        const unsubscribe = NetInfo.addEventListener(state => {
+            const connected = state.isConnected && state.isInternetReachable;
+            setIsConnected(connected);
+            setIsOfflineMode(!connected);
+        });
+
+        // Verificar conectividad inicial
+        NetInfo.fetch().then(state => {
+            const connected = state.isConnected && state.isInternetReachable;
+            setIsConnected(connected);
+            setIsOfflineMode(!connected);
+        });
+
+        return () => unsubscribe();
     }, []);
 
     // Efecto para rastrear la ubicación del usuario en tiempo real
@@ -160,14 +182,15 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
                             const { latitude, longitude } = location.coords;
                             setUserLocation({ latitude, longitude });
 
-                            // Actualizar región del mapa si es la primera vez
-                            if (!currentLocation) {
+                            // Actualizar región del mapa solo la primera vez
+                            if (!hasInitializedMapRegion) {
                                 setMapRegion({
                                     latitude,
                                     longitude,
                                     latitudeDelta: 0.01,
                                     longitudeDelta: 0.01,
                                 });
+                                setHasInitializedMapRegion(true);
                             }
                         }
                     );
@@ -184,10 +207,16 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
                 locationSubscription.remove();
             }
         };
-    }, [locationPermission, isTrackingLocation]);
+    }, [locationPermission, isTrackingLocation, hasInitializedMapRegion]);
 
     // Función unificada para descargar tiles con progreso
     const downloadTilesWithProgress = async () => {
+        // Verificar conectividad antes de descargar
+        if (!isConnected) {
+            Alert.alert("Error", "No hay conexión a internet. No se pueden descargar los mapas offline.");
+            return;
+        }
+
         try {
             setIsDownloading(true);
             setDownloadProgress(0);
@@ -354,12 +383,16 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
             });
             const { latitude, longitude } = location.coords;
             setUserLocation({ latitude, longitude });
-            setMapRegion({
+
+            // Actualizar región del mapa con la ubicación actual
+            const newRegion = {
                 latitude,
                 longitude,
                 latitudeDelta: 0.01,
                 longitudeDelta: 0.01,
-            });
+            };
+            setMapRegion(newRegion);
+            setHasInitializedMapRegion(true);
             setShowMap(true);
         } catch (error) {
             console.error("Error al obtener ubicación:", error);
@@ -384,8 +417,8 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
             const { latitude, longitude } = location.coords;
             let address = `Coordenadas: ${latitude.toFixed(6)}, ${longitude.toFixed(6)}`;
 
-            // Solo intentar geocodificación si estamos en modo online
-            if (!isOfflineMode) {
+            // Solo intentar geocodificación si hay conexión y no estamos en modo offline
+            if (!isOfflineMode && isConnected) {
                 try {
                     const addressResponse = await Location.reverseGeocodeAsync({
                         latitude,
@@ -526,22 +559,14 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
             return;
         }
 
-        if (!clientForm.location) {
-            Alert.alert(
-                "Error",
-                'Se requiere la ubicación. Presiona "Obtener Ubicación"'
-            );
-            return;
-        }
-
         // Crear nuevo cliente
         const newClient = {
             id: Date.now().toString(),
             name: clientForm.name.trim(),
             contact: clientForm.contact.trim(),
             quantity: parseFloat(clientForm.quantity),
-            location: clientForm.location,
-            address: clientForm.address,
+            location: clientForm.location || null, // Ubicación opcional
+            address: clientForm.address || "Ubicación no especificada",
             status: "pending",
             photos: clientForm.photos || [],
             createdAt: new Date().toISOString(),
@@ -617,14 +642,6 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
             return;
         }
 
-        if (!clientForm.location) {
-            Alert.alert(
-                "Error",
-                'Se requiere la ubicación. Presiona "Obtener Ubicación"'
-            );
-            return;
-        }
-
         // Actualizar cliente existente
         const updatedClients = clients.map((client) => {
             if (client.id === editingClient.id) {
@@ -633,8 +650,8 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
                     name: clientForm.name.trim(),
                     contact: clientForm.contact.trim(),
                     quantity: parseFloat(clientForm.quantity),
-                    location: clientForm.location,
-                    address: clientForm.address,
+                    location: clientForm.location || null, // Ubicación opcional
+                    address: clientForm.address || "Ubicación no especificada",
                     photos: clientForm.photos || [],
                     updatedAt: new Date().toISOString(),
                 };
@@ -967,25 +984,29 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
 
                         {/* Ubicación */}
                         <View style={styles.inputContainer}>
-                            <Text style={styles.inputLabel}>Ubicación:</Text>
-                            <TouchableOpacity
-                                style={[
-                                    styles.locationButton,
-                                    isLoadingLocation && styles.locationButtonLoading,
-                                ]}
-                                onPress={getCurrentLocation}
-                                disabled={isLoadingLocation}
-                            >
-                                {isLoadingLocation ? (
-                                    <ActivityIndicator color={COLORS.text} />
-                                ) : (
-                                    <Text style={styles.locationButtonText}>
-                                        {clientForm.location
-                                            ? "✓ Ubicación obtenida"
-                                            : "📍 Obtener ubicación"}
-                                    </Text>
-                                )}
-                            </TouchableOpacity>
+                            <Text style={styles.inputLabel}>Ubicación (opcional):</Text>
+                            <View style={styles.locationOptionsContainer}>
+                                <TouchableOpacity
+                                    style={[
+                                        styles.locationOptionButton,
+                                        isLoadingLocation && styles.locationButtonLoading
+                                    ]}
+                                    onPress={getCurrentLocation}
+                                    disabled={isLoadingLocation}
+                                >
+                                    {isLoadingLocation ? (
+                                        <ActivityIndicator color={COLORS.text} />
+                                    ) : (
+                                        <Text style={styles.locationOptionText}>📍 Automática</Text>
+                                    )}
+                                </TouchableOpacity>
+                                <TouchableOpacity
+                                    style={styles.locationOptionButton}
+                                    onPress={() => setManualLocationModalVisible(true)}
+                                >
+                                    <Text style={styles.locationOptionText}>🗺️ Manual</Text>
+                                </TouchableOpacity>
+                            </View>
                             {clientForm.address && (
                                 <Text style={styles.addressText}>{clientForm.address}</Text>
                             )}
@@ -1105,23 +1126,29 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
 
                         {/* Ubicación */}
                         <View style={styles.inputContainer}>
-                            <Text style={styles.inputLabel}>Ubicación:</Text>
-                            <TouchableOpacity
-                                style={[
-                                    styles.locationButton,
-                                    isLoadingLocation && styles.locationButtonLoading
-                                ]}
-                                onPress={getCurrentLocation}
-                                disabled={isLoadingLocation}
-                            >
-                                {isLoadingLocation ? (
-                                    <ActivityIndicator color={COLORS.text} />
-                                ) : (
-                                    <Text style={styles.locationButtonText}>
-                                        {clientForm.location ? '✓ Ubicación obtenida' : '📍 Obtener ubicación'}
-                                    </Text>
-                                )}
-                            </TouchableOpacity>
+                            <Text style={styles.inputLabel}>Ubicación (opcional):</Text>
+                            <View style={styles.locationOptionsContainer}>
+                                <TouchableOpacity
+                                    style={[
+                                        styles.locationOptionButton,
+                                        isLoadingLocation && styles.locationButtonLoading
+                                    ]}
+                                    onPress={getCurrentLocation}
+                                    disabled={isLoadingLocation}
+                                >
+                                    {isLoadingLocation ? (
+                                        <ActivityIndicator color={COLORS.text} />
+                                    ) : (
+                                        <Text style={styles.locationOptionText}>📍 Automática</Text>
+                                    )}
+                                </TouchableOpacity>
+                                <TouchableOpacity
+                                    style={styles.locationOptionButton}
+                                    onPress={() => setManualLocationModalVisible(true)}
+                                >
+                                    <Text style={styles.locationOptionText}>🗺️ Manual</Text>
+                                </TouchableOpacity>
+                            </View>
                             {clientForm.address && (
                                 <Text style={styles.addressText}>{clientForm.address}</Text>
                             )}
@@ -1346,6 +1373,107 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
         );
     }
 
+    // Renderizar modal de ubicación manual
+    const renderManualLocationModal = () => (
+        <Modal
+            animationType="slide"
+            transparent={true}
+            visible={manualLocationModalVisible}
+            onRequestClose={() => setManualLocationModalVisible(false)}
+        >
+            <View style={styles.modalOverlay}>
+                <View style={styles.manualLocationModalContent}>
+                    <Text style={styles.modalTitle}>Seleccionar Ubicación Manualmente</Text>
+                    <View style={styles.manualMapContainer}>
+                        <MapView
+                            style={styles.manualMap}
+                            initialRegion={userLocation ? {
+                                latitude: userLocation.latitude,
+                                longitude: userLocation.longitude,
+                                latitudeDelta: 0.01,
+                                longitudeDelta: 0.01
+                            } : mapRegion}
+                            mapType={manualMapType}
+                            onPress={(e) => setSelectedLocation(e.nativeEvent.coordinate)}
+                            showsUserLocation={true}
+                        >
+                            <UrlTile
+                                urlTemplate={isOfflineMode ? OFFLINE_TILE_URL : ONLINE_TILE_URL}
+                                maximumZ={19}
+                                flipY={false}
+                            />
+                            {selectedLocation && (
+                                <Marker coordinate={selectedLocation} title="Ubicación seleccionada" />
+                            )}
+                        </MapView>
+                        <View style={styles.manualMapButtons}>
+                            <TouchableOpacity
+                                style={styles.mapTypeButton}
+                                onPress={() => {
+                                    if (manualMapType === 'standard') {
+                                        if (isConnected) {
+                                            setManualMapType('satellite');
+                                        } else {
+                                            Alert.alert("Sin conexión", "El modo satélite requiere conexión a internet.");
+                                        }
+                                    } else {
+                                        setManualMapType('standard');
+                                    }
+                                }}
+                            >
+                                <Text style={styles.mapTypeButtonText}>
+                                    {manualMapType === 'standard' ? '🛰️ Satélite' : '🗺️ Standard'}
+                                </Text>
+                            </TouchableOpacity>
+                        </View>
+                    </View>
+
+                    <View style={styles.manualLocationButtons}>
+                        {selectedLocation && (
+                            <TouchableOpacity
+                                style={styles.markHereButton}
+                                onPress={async () => {
+                                    let address = `Coordenadas: ${selectedLocation.latitude.toFixed(6)}, ${selectedLocation.longitude.toFixed(6)}`;
+                                    if (!isOfflineMode) {
+                                        try {
+                                            const addressResponse = await Location.reverseGeocodeAsync(selectedLocation);
+                                            if (addressResponse.length > 0) {
+                                                const addr = addressResponse[0];
+                                                address = [addr.street, addr.streetNumber, addr.city, addr.region]
+                                                    .filter(Boolean)
+                                                    .join(', ');
+                                            }
+                                        } catch (error) {
+                                            console.warn("Error en geocodificación:", error);
+                                        }
+                                    }
+                                    setClientForm(prev => ({
+                                        ...prev,
+                                        location: selectedLocation,
+                                        address: address,
+                                    }));
+                                    setManualLocationModalVisible(false);
+                                    setSelectedLocation(null);
+                                }}
+                            >
+                                <Text style={styles.markHereButtonText}>Marcar aquí</Text>
+                            </TouchableOpacity>
+                        )}
+                        <TouchableOpacity
+                            style={styles.cancelManualButton}
+                            onPress={() => {
+                                setManualLocationModalVisible(false);
+                                setSelectedLocation(null);
+                            }}
+                        >
+                            <Text style={styles.cancelManualButtonText}>Cancelar</Text>
+                        </TouchableOpacity>
+                    </View>
+                </View>
+            </View>
+        </Modal>
+    );
+
     // Función para centrar el mapa en un cliente específico
     const centerMapOnClient = (client) => {
         if (!showMap) {
@@ -1409,6 +1537,7 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
                             ref={(ref) => setMapRef(ref)}
                             style={styles.map}
                             initialRegion={mapRegion}
+                            mapType={mapType} // Propiedad para cambiar el tipo de mapa
                             showsUserLocation={true}
                             showsMyLocationButton={false}
                             showsCompass={true}
@@ -1420,7 +1549,7 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
                             loadingBackgroundColor={COLORS.background}
                             onMapReady={() => console.log('Mapa cargado correctamente')}
                             onError={(error) => console.error('Error en el mapa:', error)}
-                            onRegionChangeComplete={setMapRegion} // Actualiza la región al mover el mapa
+                            onRegionChangeComplete={setMapRegion}
                         >
                             {/* Usamos UrlTile para cargar tiles online u offline */}
                             <UrlTile
@@ -1485,6 +1614,24 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
                             >
                                 <Text style={styles.mapActionButtonText}>✕</Text>
                             </TouchableOpacity>
+                            <TouchableOpacity
+                                style={styles.mapActionButton}
+                                onPress={() => {
+                                    if (mapType === 'standard') {
+                                        if (isConnected) {
+                                            setMapType('satellite');
+                                        } else {
+                                            Alert.alert("Sin conexión", "El modo satélite requiere conexión a internet.");
+                                        }
+                                    } else {
+                                        setMapType('standard');
+                                    }
+                                }}
+                            >
+                                <Text style={styles.mapActionButtonText}>
+                                    {mapType === 'standard' ? '🛰️' : '🗺️'}
+                                </Text>
+                            </TouchableOpacity>
                         </View>
                     </View>
                 )}
@@ -1494,20 +1641,29 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
                     <View style={styles.offlineControls}>
                         <TouchableOpacity
                             style={[styles.offlineButton, isOfflineMode && styles.offlineButtonActive]}
-                            onPress={() => setIsOfflineMode(!isOfflineMode)}
+                            onPress={() => {
+                                if (isConnected) {
+                                    setIsOfflineMode(!isOfflineMode);
+                                } else {
+                                    Alert.alert("Sin conexión", "No hay conexión a internet disponible.");
+                                }
+                            }}
                         >
                             <Text style={styles.offlineButtonText}>
-                                {isOfflineMode ? "📶 Modo Online" : "📴 Modo Offline"}
+                                {isOfflineMode ? `📶 Modo Online ${!isConnected ? '(Sin conexión)' : ''}` : "📴 Modo Offline"}
                             </Text>
                         </TouchableOpacity>
 
                         <TouchableOpacity
-                            style={[styles.downloadButton, isDownloading && styles.downloadButtonDisabled]}
+                            style={[
+                                styles.downloadButton,
+                                (isDownloading || !isConnected) && styles.downloadButtonDisabled
+                            ]}
                             onPress={() => setOfflineDownloadModalVisible(true)}
-                            disabled={isDownloading}
+                            disabled={isDownloading || !isConnected}
                         >
                             <Text style={styles.downloadButtonText}>
-                                {isDownloading ? "⏳ Descargando..." : "💾 Descargar Mapa"}
+                                {isDownloading ? "⏳ Descargando..." : !isConnected ? "❌ Sin conexión" : "💾 Descargar Mapa"}
                             </Text>
                         </TouchableOpacity>
                     </View>
@@ -1590,6 +1746,7 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
             {renderCameraModal()}
             {renderPhotoConfirmModal()}
             {renderImageViewer()}
+            {renderManualLocationModal()}
         </View>
     );
 };
@@ -2276,6 +2433,85 @@ const styles = StyleSheet.create({
         color: 'white',
         fontSize: 16,
         fontWeight: '500',
+    },
+    locationOptionsContainer: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        marginTop: 8,
+    },
+    locationOptionButton: {
+        flex: 1,
+        backgroundColor: COLORS.accent,
+        padding: 12,
+        borderRadius: 8,
+        alignItems: 'center',
+        marginHorizontal: 4,
+    },
+    locationOptionText: {
+        color: COLORS.text,
+        fontSize: 14,
+        fontWeight: '600',
+    },
+    manualLocationModalContent: {
+        backgroundColor: COLORS.background,
+        padding: 20,
+        borderRadius: 12,
+        width: '90%',
+        height: '80%',
+    },
+    manualMap: {
+        width: '100%',
+        height: '70%',
+        borderRadius: 8,
+        marginBottom: 16,
+    },
+    manualLocationButtons: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+    },
+    markHereButton: {
+        backgroundColor: COLORS.success,
+        padding: 12,
+        borderRadius: 8,
+        flex: 1,
+        marginRight: 8,
+        alignItems: 'center',
+    },
+    markHereButtonText: {
+        color: COLORS.text,
+        fontSize: 16,
+        fontWeight: '600',
+    },
+    cancelManualButton: {
+        backgroundColor: COLORS.danger,
+        padding: 12,
+        borderRadius: 8,
+        flex: 1,
+        marginLeft: 8,
+        alignItems: 'center',
+    },
+    cancelManualButtonText: {
+        color: COLORS.text,
+        fontSize: 16,
+        fontWeight: '600',
+    },
+    manualMapContainer: {
+        position: 'relative',
+    },
+    manualMapButtons: {
+        position: 'absolute',
+        bottom: 20,
+        right: 10,
+    },
+    mapTypeButton: {
+        backgroundColor: COLORS.background,
+        padding: 8,
+        borderRadius: 5,
+        elevation: 2,
+    },
+    mapTypeButtonText: {
+        color: COLORS.text,
+        fontSize: 14,
     },
 });
 

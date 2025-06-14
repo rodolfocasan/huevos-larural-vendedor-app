@@ -1,6 +1,6 @@
 // Components/Home/Header.js
 import React, { useState, useEffect } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Modal, TextInput, FlatList, Platform, SafeAreaView, Alert } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Modal, TextInput, SafeAreaView, Alert } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -11,12 +11,9 @@ import { COLORS } from '../Utils/Constants';
 
 
 // Componente Header que maneja el encabezado de la aplicación
-const Header = ({ sales, currentSaleId, setCurrentSaleId, createNewSale, eggsPrice, saveEggsPrice }) => {
+const Header = ({ eggsPrice, saveEggsPrice }) => {
     // Obtener las dimensiones del área segura del dispositivo
     const insets = useSafeAreaInsets();
-
-    // Estado para controlar la visibilidad del menú de ventas
-    const [menuVisible, setMenuVisible] = useState(false);
 
     // Estado para controlar la visibilidad del modal de configuración
     const [settingsVisible, setSettingsVisible] = useState(false);
@@ -60,9 +57,6 @@ const Header = ({ sales, currentSaleId, setCurrentSaleId, createNewSale, eggsPri
             console.error('No se pudo guardar las opciones de precio:', e);
         }
     };
-
-    // Función para alternar la visibilidad del menú de ventas
-    const toggleMenu = () => setMenuVisible(!menuVisible);
 
     // Función para alternar la visibilidad del modal de configuración
     const toggleSettings = () => {
@@ -135,9 +129,6 @@ const Header = ({ sales, currentSaleId, setCurrentSaleId, createNewSale, eggsPri
         setShowAddPrice(false);
     };
 
-    // Obtener el nombre de la venta actual
-    const currentSaleName = sales.find(sale => sale.id === currentSaleId)?.name || 'Cargando...';
-
     return (
         <View style={[styles.header, { paddingTop: insets.top + 15 }]}>
             {/* Contenedor izquierdo para el botón hamburguesa */}
@@ -149,71 +140,10 @@ const Header = ({ sales, currentSaleId, setCurrentSaleId, createNewSale, eggsPri
                 </TouchableOpacity>
             </View>
 
-            {/* Contenedor derecho para el menú de ventas */}
+            {/* Contenedor derecho para el título */}
             <View style={styles.rightContainer}>
-                <TouchableOpacity style={styles.menuButton} onPress={toggleMenu}>
-                    <Text style={styles.currentSaleName}>{currentSaleName} ▼</Text>
-                </TouchableOpacity>
+                <Text style={styles.appTitle}>Vendedor App</Text>
             </View>
-
-            {/* Modal del menú de ventas */}
-            <Modal
-                animationType="slide"
-                transparent={true}
-                visible={menuVisible}
-                onRequestClose={() => setMenuVisible(false)}
-            >
-                <View style={styles.modalOverlay}>
-                    <SafeAreaView style={styles.safeModalContainer}>
-                        <View style={styles.modalContent}>
-                            {/* Header del modal con botón X */}
-                            <View style={styles.modalHeader}>
-                                <Text style={styles.modalTitle}>Ventas</Text>
-                                <TouchableOpacity
-                                    style={styles.closeButton}
-                                    onPress={() => setMenuVisible(false)}
-                                >
-                                    <Text style={styles.closeButtonText}>×</Text>
-                                </TouchableOpacity>
-                            </View>
-                            <FlatList
-                                data={sales}
-                                keyExtractor={(item) => item.id}
-                                renderItem={({ item }) => (
-                                    <TouchableOpacity
-                                        style={[
-                                            styles.saleItem,
-                                            currentSaleId === item.id && styles.selectedSaleItem,
-                                        ]}
-                                        onPress={() => {
-                                            setCurrentSaleId(item.id);
-                                            setMenuVisible(false);
-                                        }}
-                                    >
-                                        <Text
-                                            style={[
-                                                styles.saleItemText,
-                                                currentSaleId === item.id && styles.selectedSaleItemText,
-                                            ]}
-                                        >
-                                            {item.name}
-                                        </Text>
-                                    </TouchableOpacity>
-                                )}
-                            />
-                            <TouchableOpacity
-                                style={styles.newSaleButton}
-                                onPress={() => {
-                                    createNewSale();
-                                    setMenuVisible(false);
-                                }}
-                            >
-                                <Text style={styles.newSaleButtonText}>(+) Nueva venta</Text>
-                            </TouchableOpacity>
-                        </View>
-                    </SafeAreaView>
-                </View>
-            </Modal>
 
             {/* Modal de configuración */}
             <Modal
@@ -235,17 +165,6 @@ const Header = ({ sales, currentSaleId, setCurrentSaleId, createNewSale, eggsPri
                                     <Text style={styles.closeButtonText}>×</Text>
                                 </TouchableOpacity>
                             </View>
-
-                            {/* Sección N° de Venta */}
-                            <View style={styles.settingSection}>
-                                <Text style={styles.sectionTitle}>N° de Venta:</Text>
-                                <View style={styles.sectionContent}>
-                                    <Text style={styles.sectionValue}>{currentSaleName}</Text>
-                                </View>
-                            </View>
-
-                            {/* Separador */}
-                            <View style={styles.separator} />
 
                             {/* Sección Precio de venta */}
                             <View style={styles.settingSection}>
@@ -346,15 +265,15 @@ const Header = ({ sales, currentSaleId, setCurrentSaleId, createNewSale, eggsPri
 };
 
 const styles = StyleSheet.create({
+    // Estilos del header principal
     header: {
         backgroundColor: COLORS.primary,
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
-        paddingBottom: 15, // Solo padding inferior, el superior se maneja dinámicamente
+        paddingBottom: 15,
         paddingHorizontal: 20,
         elevation: 4,
-        // Removido paddingTop fijo para usar el dinámico con insets
     },
     leftContainer: {
         flex: 0,
@@ -364,6 +283,12 @@ const styles = StyleSheet.create({
         flex: 1,
         alignItems: 'flex-end',
     },
+    appTitle: {
+        color: COLORS.text,
+        fontSize: 18,
+        fontWeight: 'bold',
+    },
+
     // Estilos del botón hamburguesa
     hamburgerButton: {
         padding: 12,
@@ -381,19 +306,8 @@ const styles = StyleSheet.create({
         marginVertical: 1.5,
         borderRadius: 1.25,
     },
-    menuButton: {
-        padding: 10,
-        borderRadius: 25,
-        backgroundColor: COLORS.accent,
-        paddingHorizontal: 20,
-        height: 40,
-        justifyContent: 'center',
-    },
-    currentSaleName: {
-        color: COLORS.text,
-        fontSize: 14,
-        fontWeight: '800',
-    },
+
+    // Estilos del modal
     modalOverlay: {
         flex: 1,
         backgroundColor: 'rgba(0, 0, 0, 0.5)',
@@ -406,13 +320,6 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         alignItems: 'center',
     },
-    modalContent: {
-        width: '80%',
-        backgroundColor: COLORS.card,
-        borderRadius: 10,
-        padding: 20,
-        maxHeight: '70%',
-    },
     settingsModalContent: {
         width: '85%',
         backgroundColor: COLORS.card,
@@ -420,13 +327,6 @@ const styles = StyleSheet.create({
         padding: 24,
         maxHeight: '80%',
     },
-    modalTitle: {
-        fontSize: 20,
-        fontWeight: 'bold',
-        color: COLORS.text,
-        flex: 1,
-    },
-    // Estilos del modal
     modalHeader: {
         flexDirection: 'row',
         justifyContent: 'space-between',
@@ -435,6 +335,12 @@ const styles = StyleSheet.create({
         paddingBottom: 12,
         borderBottomWidth: 1,
         borderBottomColor: COLORS.textSecondary + '30',
+    },
+    modalTitle: {
+        fontSize: 20,
+        fontWeight: 'bold',
+        color: COLORS.text,
+        flex: 1,
     },
     closeButton: {
         backgroundColor: COLORS.error || '#FF6B6B',
@@ -451,6 +357,7 @@ const styles = StyleSheet.create({
         fontWeight: 'bold',
         lineHeight: 22,
     },
+
     // Estilos de las secciones de configuración
     settingSection: {
         marginBottom: 20,
@@ -461,21 +368,7 @@ const styles = StyleSheet.create({
         color: COLORS.text,
         marginBottom: 12,
     },
-    sectionContent: {
-        backgroundColor: COLORS.background,
-        borderRadius: 8,
-        padding: 12,
-    },
-    sectionValue: {
-        fontSize: 16,
-        color: COLORS.text,
-        fontWeight: '500',
-    },
-    separator: {
-        height: 1,
-        backgroundColor: COLORS.textSecondary + '30',
-        marginVertical: 16,
-    },
+
     // Estilos del botón de precio
     priceButton: {
         backgroundColor: COLORS.background,
@@ -491,6 +384,7 @@ const styles = StyleSheet.create({
         color: COLORS.text,
         fontWeight: '600',
     },
+
     // Estilos del contenedor de opciones de precio
     priceOptionsContainer: {
         backgroundColor: COLORS.background,
@@ -535,6 +429,7 @@ const styles = StyleSheet.create({
         fontWeight: 'bold',
         lineHeight: 18,
     },
+
     // Estilos para agregar precio
     addPriceButton: {
         backgroundColor: COLORS.success,
@@ -590,6 +485,7 @@ const styles = StyleSheet.create({
         fontWeight: 'bold',
         lineHeight: 20,
     },
+
     // Estilos del precio calculado
     calculatedContainer: {
         backgroundColor: COLORS.background,
@@ -605,35 +501,6 @@ const styles = StyleSheet.create({
     },
     calculatedPrice: {
         fontSize: 16,
-        color: COLORS.text,
-        fontWeight: 'bold',
-    },
-    // Estilos del menú de ventas (mantener los existentes)
-    saleItem: {
-        paddingVertical: 12,
-        paddingHorizontal: 15,
-        borderRadius: 5,
-        marginBottom: 5,
-    },
-    selectedSaleItem: {
-        backgroundColor: COLORS.accent,
-    },
-    saleItemText: {
-        color: COLORS.text,
-        fontSize: 16,
-    },
-    selectedSaleItemText: {
-        fontWeight: 'bold',
-    },
-    newSaleButton: {
-        marginTop: 10,
-        backgroundColor: COLORS.success,
-        paddingVertical: 12,
-        paddingHorizontal: 15,
-        borderRadius: 5,
-        alignItems: 'center',
-    },
-    newSaleButtonText: {
         color: COLORS.text,
         fontWeight: 'bold',
     },

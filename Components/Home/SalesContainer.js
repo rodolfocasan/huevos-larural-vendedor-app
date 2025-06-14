@@ -119,7 +119,6 @@ const SalesContainer = ({ sale, updateSale, eggsPrice, locations, currentLocatio
             <TouchableOpacity
                 style={styles.modalOverlay}
                 activeOpacity={1}
-                onPress={() => setExpenseModalVisible(false)}
             >
                 <View style={styles.modalContent}>
                     <Text style={styles.modalTitle}>Registrar Gasto</Text>
