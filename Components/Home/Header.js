@@ -1,6 +1,6 @@
 // Components/Home/Header.js
 import React, { useState, useEffect } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Modal, TextInput, SafeAreaView, Alert } from 'react-native';
+import { View, ScrollView, Text, TouchableOpacity, StyleSheet, Modal, TextInput, SafeAreaView, Alert } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -11,7 +11,7 @@ import { COLORS } from '../Utils/Constants';
 
 
 // Componente Header que maneja el encabezado de la aplicación
-const Header = ({ eggsPrice, saveEggsPrice }) => {
+const Header = ({ eggsPrice, saveEggsPrice, purchasePrice, savePurchasePrice, showAnalysis, saveShowAnalysis }) => {
     // Obtener las dimensiones del área segura del dispositivo
     const insets = useSafeAreaInsets();
 
@@ -29,6 +29,14 @@ const Header = ({ eggsPrice, saveEggsPrice }) => {
 
     // Estado para mostrar el campo de agregar precio
     const [showAddPrice, setShowAddPrice] = useState(false);
+
+    // Estado para el input del precio de compra
+    const [purchasePriceInput, setPurchasePriceInput] = useState(purchasePrice.toString());
+
+    // Actualizar el input cuando cambie el precio de compra
+    useEffect(() => {
+        setPurchasePriceInput(purchasePrice.toString());
+    }, [purchasePrice]);
 
     // Cargar opciones de precio al inicializar el componente
     useEffect(() => {
@@ -129,6 +137,38 @@ const Header = ({ eggsPrice, saveEggsPrice }) => {
         setShowAddPrice(false);
     };
 
+    // Función para actualizar el precio de compra
+    const updatePurchasePrice = () => {
+        const newPrice = parseFloat(purchasePriceInput);
+        if (isNaN(newPrice) || newPrice <= 0) {
+            Alert.alert('Error', 'Ingrese un precio válido');
+            return;
+        }
+        savePurchasePrice(newPrice);
+    };
+
+    // Función para alternar el análisis
+    const toggleAnalysis = () => {
+        saveShowAnalysis(!showAnalysis);
+    };
+
+    // Calcular análisis de ganancias
+    const calculateAnalysis = () => {
+        const sellPricePerBox = eggsPrice * 12; // Precio de venta por caja
+        const profitPerBox = sellPricePerBox - purchasePrice; // Ganancia por caja
+        const profitPerCarton = eggsPrice - (purchasePrice / 12); // Ganancia por cartón
+        const profitPercentage = ((profitPerBox / purchasePrice) * 100); // Porcentaje de ganancia
+
+        return {
+            sellPricePerBox,
+            profitPerBox,
+            profitPerCarton,
+            profitPercentage
+        };
+    };
+
+    const analysis = calculateAnalysis();
+
     return (
         <View style={[styles.header, { paddingTop: insets.top + 15 }]}>
             {/* Contenedor izquierdo para el botón hamburguesa */}
@@ -155,7 +195,7 @@ const Header = ({ eggsPrice, saveEggsPrice }) => {
                 <View style={styles.modalOverlay}>
                     <SafeAreaView style={styles.safeModalContainer}>
                         <View style={styles.settingsModalContent}>
-                            {/* Header del modal con botón X */}
+                            {/* Header del modal con botón X - FIJO */}
                             <View style={styles.modalHeader}>
                                 <Text style={styles.modalTitle}>Configuración</Text>
                                 <TouchableOpacity
@@ -166,96 +206,179 @@ const Header = ({ eggsPrice, saveEggsPrice }) => {
                                 </TouchableOpacity>
                             </View>
 
-                            {/* Sección Precio de venta */}
-                            <View style={styles.settingSection}>
-                                <Text style={styles.sectionTitle}>Precio de venta:</Text>
+                            {/* Contenido desplazable */}
+                            <ScrollView
+                                style={styles.scrollContainer}
+                                contentContainerStyle={styles.scrollContent}
+                                showsVerticalScrollIndicator={true}
+                                keyboardShouldPersistTaps="handled"
+                            >
+                                {/* Sección Precio de venta */}
+                                <View style={styles.settingSection}>
+                                    <Text style={styles.sectionTitle}>Precio de venta:</Text>
 
-                                {/* Botón para mostrar/ocultar opciones de precio */}
-                                <TouchableOpacity
-                                    style={styles.priceButton}
-                                    onPress={togglePriceMenu}
-                                >
-                                    <Text style={styles.priceButtonText}>
-                                        ${eggsPrice.toFixed(2)} {priceMenuVisible ? '▲' : '▼'}
-                                    </Text>
-                                </TouchableOpacity>
+                                    {/* Botón para mostrar/ocultar opciones de precio */}
+                                    <TouchableOpacity
+                                        style={styles.priceButton}
+                                        onPress={togglePriceMenu}
+                                    >
+                                        <Text style={styles.priceButtonText}>
+                                            ${eggsPrice.toFixed(2)} {priceMenuVisible ? '▲' : '▼'}
+                                        </Text>
+                                    </TouchableOpacity>
 
-                                {/* Submenú de opciones de precio */}
-                                {priceMenuVisible && (
-                                    <View style={styles.priceOptionsContainer}>
-                                        {priceOptions.map((price, index) => (
-                                            <View key={index} style={styles.priceOptionRow}>
-                                                <TouchableOpacity
-                                                    style={[
-                                                        styles.priceOption,
-                                                        eggsPrice === price && styles.selectedPriceOption
-                                                    ]}
-                                                    onPress={() => selectPrice(price)}
-                                                >
-                                                    <Text style={[
-                                                        styles.priceOptionText,
-                                                        eggsPrice === price && styles.selectedPriceOptionText
-                                                    ]}>
-                                                        ${price.toFixed(2)}
-                                                    </Text>
-                                                </TouchableOpacity>
+                                    {/* Submenú de opciones de precio */}
+                                    {priceMenuVisible && (
+                                        <View style={styles.priceOptionsContainer}>
+                                            {priceOptions.map((price, index) => (
+                                                <View key={index} style={styles.priceOptionRow}>
+                                                    <TouchableOpacity
+                                                        style={[
+                                                            styles.priceOption,
+                                                            eggsPrice === price && styles.selectedPriceOption
+                                                        ]}
+                                                        onPress={() => selectPrice(price)}
+                                                    >
+                                                        <Text style={[
+                                                            styles.priceOptionText,
+                                                            eggsPrice === price && styles.selectedPriceOptionText
+                                                        ]}>
+                                                            ${price.toFixed(2)}
+                                                        </Text>
+                                                    </TouchableOpacity>
 
-                                                {/* Botón X para eliminar opción */}
-                                                <TouchableOpacity
-                                                    style={styles.removeButton}
-                                                    onPress={() => removePriceOption(price)}
-                                                >
-                                                    <Text style={styles.removeButtonText}>×</Text>
-                                                </TouchableOpacity>
-                                            </View>
-                                        ))}
+                                                    {/* Botón X para eliminar opción */}
+                                                    <TouchableOpacity
+                                                        style={styles.removeButton}
+                                                        onPress={() => removePriceOption(price)}
+                                                    >
+                                                        <Text style={styles.removeButtonText}>×</Text>
+                                                    </TouchableOpacity>
+                                                </View>
+                                            ))}
 
-                                        {/* Botón para agregar nueva opción */}
-                                        {!showAddPrice ? (
-                                            <TouchableOpacity
-                                                style={styles.addPriceButton}
-                                                onPress={() => setShowAddPrice(true)}
-                                            >
-                                                <Text style={styles.addPriceButtonText}>+ Agregar precio</Text>
-                                            </TouchableOpacity>
-                                        ) : (
-                                            <View style={styles.addPriceContainer}>
-                                                <TextInput
-                                                    style={styles.newPriceInput}
-                                                    value={newPriceInput}
-                                                    onChangeText={setNewPriceInput}
-                                                    placeholder="Nuevo precio"
-                                                    placeholderTextColor={COLORS.textSecondary}
-                                                    keyboardType="numeric"
-                                                />
+                                            {/* Botón para agregar nueva opción */}
+                                            {!showAddPrice ? (
                                                 <TouchableOpacity
-                                                    style={styles.confirmAddButton}
-                                                    onPress={addPriceOption}
+                                                    style={styles.addPriceButton}
+                                                    onPress={() => setShowAddPrice(true)}
                                                 >
-                                                    <Text style={styles.confirmAddButtonText}>✓</Text>
+                                                    <Text style={styles.addPriceButtonText}>+ Agregar precio</Text>
                                                 </TouchableOpacity>
-                                                <TouchableOpacity
-                                                    style={styles.cancelAddButton}
-                                                    onPress={() => {
-                                                        setShowAddPrice(false);
-                                                        setNewPriceInput('');
-                                                    }}
-                                                >
-                                                    <Text style={styles.cancelAddButtonText}>×</Text>
-                                                </TouchableOpacity>
-                                            </View>
-                                        )}
+                                            ) : (
+                                                <View style={styles.addPriceContainer}>
+                                                    <TextInput
+                                                        style={styles.newPriceInput}
+                                                        value={newPriceInput}
+                                                        onChangeText={setNewPriceInput}
+                                                        placeholder="Nuevo precio"
+                                                        placeholderTextColor={COLORS.textSecondary}
+                                                        keyboardType="numeric"
+                                                    />
+                                                    <TouchableOpacity
+                                                        style={styles.confirmAddButton}
+                                                        onPress={addPriceOption}
+                                                    >
+                                                        <Text style={styles.confirmAddButtonText}>✓</Text>
+                                                    </TouchableOpacity>
+                                                    <TouchableOpacity
+                                                        style={styles.cancelAddButton}
+                                                        onPress={() => {
+                                                            setShowAddPrice(false);
+                                                            setNewPriceInput('');
+                                                        }}
+                                                    >
+                                                        <Text style={styles.cancelAddButtonText}>×</Text>
+                                                    </TouchableOpacity>
+                                                </View>
+                                            )}
+                                        </View>
+                                    )}
+
+                                    {/* Precio por caja calculado */}
+                                    <View style={styles.calculatedContainer}>
+                                        <Text style={styles.calculatedLabel}>Precio por caja:</Text>
+                                        <Text style={styles.calculatedPrice}>
+                                            ${(eggsPrice * 12).toFixed(2)}
+                                        </Text>
                                     </View>
-                                )}
-
-                                {/* Precio por caja calculado */}
-                                <View style={styles.calculatedContainer}>
-                                    <Text style={styles.calculatedLabel}>Precio por caja:</Text>
-                                    <Text style={styles.calculatedPrice}>
-                                        ${(eggsPrice * 12).toFixed(2)}
-                                    </Text>
                                 </View>
-                            </View>
+
+                                {/* Sección Parámetros de REV */}
+                                <View style={styles.settingSection}>
+                                    <Text style={styles.sectionTitle}>Parámetros de REV:</Text>
+
+                                    {/* Precio de compra */}
+                                    <View style={styles.purchasePriceContainer}>
+                                        <Text style={styles.purchasePriceLabel}>Precio de adquisición por caja:</Text>
+                                        <View style={styles.purchasePriceInputContainer}>
+                                            <Text style={styles.dollarSign}>$</Text>
+                                            <TextInput
+                                                style={styles.purchasePriceInput}
+                                                value={purchasePriceInput}
+                                                onChangeText={setPurchasePriceInput}
+                                                onBlur={updatePurchasePrice}
+                                                keyboardType="numeric"
+                                                placeholder="0.00"
+                                                placeholderTextColor={COLORS.textSecondary}
+                                            />
+                                        </View>
+                                    </View>
+
+                                    {/* Switch para mostrar análisis */}
+                                    <View style={styles.switchContainer}>
+                                        <Text style={styles.switchLabel}>Mostrar análisis</Text>
+                                        <TouchableOpacity
+                                            style={[styles.switch, showAnalysis && styles.switchActive]}
+                                            onPress={toggleAnalysis}
+                                        >
+                                            <View style={[styles.switchThumb, showAnalysis && styles.switchThumbActive]} />
+                                        </TouchableOpacity>
+                                    </View>
+
+                                    {/* Área de análisis condicional */}
+                                    {showAnalysis && (
+                                        <View style={styles.analysisContainer}>
+                                            <View style={styles.analysisHeader}>
+                                                <Text style={styles.analysisTitle}>Análisis de Rentabilidad</Text>
+                                            </View>
+
+                                            <View style={styles.analysisContent}>
+                                                <View style={styles.analysisRow}>
+                                                    <Text style={styles.analysisLabel}>Ganancia por caja:</Text>
+                                                    <Text style={[styles.analysisValue, analysis.profitPerBox >= 0 ? styles.profitPositive : styles.profitNegative]}>
+                                                        ${analysis.profitPerBox.toFixed(2)}
+                                                    </Text>
+                                                </View>
+
+                                                <View style={styles.analysisRow}>
+                                                    <Text style={styles.analysisLabel}>Ganancia por cartón:</Text>
+                                                    <Text style={[styles.analysisValue, analysis.profitPerCarton >= 0 ? styles.profitPositive : styles.profitNegative]}>
+                                                        ${analysis.profitPerCarton.toFixed(2)}
+                                                    </Text>
+                                                </View>
+
+                                                <View style={styles.analysisRow}>
+                                                    <Text style={styles.analysisLabel}>Margen de ganancia:</Text>
+                                                    <Text style={[styles.analysisValue, styles.percentageValue, analysis.profitPercentage >= 0 ? styles.profitPositive : styles.profitNegative]}>
+                                                        {analysis.profitPercentage.toFixed(1)}%
+                                                    </Text>
+                                                </View>
+
+                                                <View style={[styles.analysisRow, styles.totalRow]}>
+                                                    <Text style={styles.analysisLabelTotal}>Precio venta por caja:</Text>
+                                                    <Text style={styles.analysisValueTotal}>
+                                                        ${analysis.sellPricePerBox.toFixed(2)}
+                                                    </Text>
+                                                </View>
+                                            </View>
+                                        </View>
+                                    )}
+                                </View>
+
+                                {/* Espacio adicional al final para mejor UX */}
+                                <View style={styles.bottomSpacing} />
+                            </ScrollView>
                         </View>
                     </SafeAreaView>
                 </View>
@@ -503,6 +626,145 @@ const styles = StyleSheet.create({
         fontSize: 16,
         color: COLORS.text,
         fontWeight: 'bold',
+    },
+    purchasePriceContainer: {
+        marginBottom: 16,
+    },
+    purchasePriceLabel: {
+        fontSize: 14,
+        color: COLORS.text,
+        marginBottom: 8,
+        fontWeight: '500',
+    },
+    purchasePriceInputContainer: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: COLORS.background,
+        borderRadius: 8,
+        borderWidth: 1,
+        borderColor: COLORS.border,
+        paddingHorizontal: 12,
+    },
+    dollarSign: {
+        fontSize: 16,
+        color: COLORS.secondary,
+        fontWeight: 'bold',
+        marginRight: 5,
+    },
+    purchasePriceInput: {
+        flex: 1,
+        padding: 12,
+        fontSize: 16,
+        color: COLORS.text,
+        fontWeight: '500',
+    },
+    switchContainer: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: 16,
+        backgroundColor: COLORS.background,
+        padding: 12,
+        borderRadius: 8,
+    },
+    switchLabel: {
+        fontSize: 14,
+        color: COLORS.text,
+        fontWeight: '500',
+        flex: 1,
+    },
+    switch: {
+        width: 50,
+        height: 28,
+        borderRadius: 14,
+        backgroundColor: COLORS.border,
+        justifyContent: 'center',
+        paddingHorizontal: 2,
+    },
+    switchActive: {
+        backgroundColor: COLORS.accent,
+    },
+    switchThumb: {
+        width: 24,
+        height: 24,
+        borderRadius: 12,
+        backgroundColor: COLORS.text,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.25,
+        shadowRadius: 2,
+        elevation: 3,
+    },
+    switchThumbActive: {
+        transform: [{ translateX: 22 }],
+    },
+    analysisContainer: {
+        backgroundColor: COLORS.background,
+        borderRadius: 12,
+        overflow: 'hidden',
+        borderWidth: 1,
+        borderColor: COLORS.accent + '30',
+    },
+    analysisHeader: {
+        backgroundColor: COLORS.accent,
+        paddingVertical: 12,
+        paddingHorizontal: 16,
+    },
+    analysisTitle: {
+        fontSize: 16,
+        fontWeight: 'bold',
+        color: COLORS.text,
+        textAlign: 'center',
+    },
+    analysisContent: {
+        padding: 16,
+    },
+    analysisRow: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: 12,
+        paddingVertical: 8,
+        paddingHorizontal: 12,
+        backgroundColor: COLORS.card,
+        borderRadius: 8,
+    },
+    totalRow: {
+        backgroundColor: COLORS.primary + '20',
+        borderWidth: 1,
+        borderColor: COLORS.primary + '40',
+        marginTop: 8,
+    },
+    analysisLabel: {
+        fontSize: 14,
+        color: COLORS.text,
+        flex: 1,
+        fontWeight: '500',
+    },
+    analysisLabelTotal: {
+        fontSize: 14,
+        color: COLORS.text,
+        flex: 1,
+        fontWeight: 'bold',
+    },
+    analysisValue: {
+        fontSize: 14,
+        fontWeight: 'bold',
+        color: COLORS.text,
+    },
+    analysisValueTotal: {
+        fontSize: 16,
+        fontWeight: 'bold',
+        color: COLORS.text,
+    },
+    percentageValue: {
+        fontSize: 15,
+    },
+    profitPositive: {
+        color: COLORS.success,
+    },
+    profitNegative: {
+        color: COLORS.error,
     },
 });
 

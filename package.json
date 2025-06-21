@@ -1,6 +1,6 @@
 {
   "name": "huevos-larural-vendedor",
-  "version": "1.0.6",
+  "version": "1.0.7",
   "main": "index.js",
   "scripts": {
     "start": "expo start",
@@ -27,7 +27,8 @@
     "react-native-maps": "1.20.1",
     "react-native-web": "^0.20.0",
     "react-native-safe-area-context": "5.4.0",
-    "@react-native-community/netinfo": "11.4.1"
+    "@react-native-community/netinfo": "11.4.1",
+    "@expo/vector-icons": "^14.1.0"
   },
   "devDependencies": {
     "@babel/core": "^7.20.0"

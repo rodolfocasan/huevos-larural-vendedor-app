@@ -12,13 +12,15 @@ import {
     ActivityIndicator,
     Dimensions,
     Button,
-    Image
+    Image,
+    Linking
 } from "react-native";
 import * as Location from "expo-location";
 import MapView, { Marker, Polyline, UrlTile } from 'react-native-maps';
 import * as FileSystem from 'expo-file-system';
 import { CameraView, CameraType, Camera } from 'expo-camera';
 import NetInfo from '@react-native-community/netinfo';
+import { FontAwesome, FontAwesome5, Ionicons, Feather } from '@expo/vector-icons';
 
 import { COLORS, formatTime, formatDate } from "../Utils/Constants";
 
@@ -94,6 +96,35 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
     const [downloadStatus, setDownloadStatus] = useState(''); // Estado textual
     const [totalTiles, setTotalTiles] = useState(0);
     const [downloadedTiles, setDownloadedTiles] = useState(0);
+
+    // Estados para el modal de confirmación de contacto en RUTA
+    const [confirmModalVisible, setConfirmModalVisible] = useState(false);
+    const [pendingAction, setPendingAction] = useState(null);
+    const [actionService, setActionService] = useState('');
+
+    // Función para mostrar el modal de confirmación
+    const showConfirmModal = (action, service) => {
+        setPendingAction(() => action);
+        setActionService(service);
+        setConfirmModalVisible(true);
+    };
+
+    // Función para confirmar la acción
+    const handleConfirmAction = () => {
+        if (pendingAction) {
+            pendingAction();
+        }
+        setConfirmModalVisible(false);
+        setPendingAction(null);
+        setActionService('');
+    };
+
+    // Función para cancelar la acción
+    const handleCancelAction = () => {
+        setConfirmModalVisible(false);
+        setPendingAction(null);
+        setActionService('');
+    };
 
     // Verificación si la venta está cargada
     if (!sale) {
@@ -820,7 +851,43 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
         return coordinates;
     };
 
-    // Renderizar item de cliente
+    const isPhoneNumber = (contact) => {
+        return /^[+]?[\d]+$/.test(contact.replace(/\s/g, ''));
+    };
+
+    // Renderizar el modal de confirmación
+    const renderConfirmModal = () => (
+        <Modal
+            animationType="fade"
+            transparent={true}
+            visible={confirmModalVisible}
+            onRequestClose={handleCancelAction}
+        >
+            <View style={styles.modalOverlay}>
+                <View style={styles.confirmModalContent}>
+                    <Text style={styles.confirmModalText}>
+                        Está a punto de salir de la aplicación para usar {actionService} con el cliente. ¿Desea continuar?
+                    </Text>
+                    <View style={styles.confirmModalButtons}>
+                        <TouchableOpacity
+                            style={[styles.modalButton, styles.cancelButton]}
+                            onPress={handleCancelAction}
+                        >
+                            <Text style={styles.modalButtonText}>Cancelar</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                            style={[styles.modalButton, styles.confirmButton]}
+                            onPress={handleConfirmAction}
+                        >
+                            <Text style={styles.modalButtonText}>Aceptar</Text>
+                        </TouchableOpacity>
+                    </View>
+                </View>
+            </View>
+        </Modal>
+    );
+
+    // Modificar la función renderClientItem
     const renderClientItem = (item, index) => (
         <View key={item.id} style={styles.clientItem}>
             <View style={styles.clientHeader}>
@@ -828,10 +895,38 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
             </View>
 
             <Text style={styles.clientContact}>📞 {item.contact}</Text>
-            <Text style={styles.clientQuantity}>
-                📦 {item.quantity} {item.quantity === 1 ? 'caja' : 'cajas'}
-                (${(item.quantity * eggsPrice * 12).toFixed(2)})
-            </Text>
+            {isPhoneNumber(item.contact) && (
+                <View style={styles.contactActions}>
+                    <TouchableOpacity
+                        style={[styles.contactButton, styles.phoneButton]}
+                        onPress={() => showConfirmModal(() => Linking.openURL(`tel:${item.contact}`), 'Teléfono')}
+                    >
+                        <Feather name="phone" size={24} color="white" />
+                        <Text style={styles.contactButtonText}>Llamar</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                        style={[styles.contactButton, styles.whatsappButton]}
+                        onPress={() => showConfirmModal(() => Linking.openURL(`whatsapp://send?phone=${item.contact}`), 'WhatsApp')}
+                    >
+                        <Ionicons name="logo-whatsapp" size={20} color="white" />
+                        <Text style={styles.contactButtonText}>WhatsApp</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                        style={[styles.contactButton, styles.telegramButton]}
+                        onPress={() => showConfirmModal(() => Linking.openURL(`tg://resolve?domain=${item.contact}`), 'Telegram')}
+                    >
+                        <FontAwesome5 name="telegram" size={24} color="white" />
+                        <Text style={styles.contactButtonText}>Telegram</Text>
+                    </TouchableOpacity>
+                </View>
+            )}
+
+            <View style={styles.quantityContainer}>
+                <Text style={styles.clientQuantity}>
+                    📦 {item.quantity} {item.quantity === 1 ? 'caja' : 'cajas'}
+                    (${(item.quantity * eggsPrice * 12).toFixed(2)})
+                </Text>
+            </View>
             <Text style={styles.clientAddress}>📍 {item.address}</Text>
 
             {/* Mostrar fotos de referencia */}
@@ -1747,6 +1842,7 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
             {renderPhotoConfirmModal()}
             {renderImageViewer()}
             {renderManualLocationModal()}
+            {renderConfirmModal()}
         </View>
     );
 };
@@ -2512,6 +2608,55 @@ const styles = StyleSheet.create({
     mapTypeButtonText: {
         color: COLORS.text,
         fontSize: 14,
+    },
+    contactActions: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        marginTop: 5,
+    },
+    contactButton: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        padding: 5,
+        borderRadius: 5,
+        minWidth: 100,
+        justifyContent: 'center',
+    },
+    phoneButton: {
+        backgroundColor: '#007AFF', // Color por defecto
+    },
+    whatsappButton: {
+        backgroundColor: '#25D366', // Verde de WhatsApp
+    },
+    telegramButton: {
+        backgroundColor: '#0088cc', // Cyan de Telegram
+    },
+    contactButtonText: {
+        color: 'white',
+        fontSize: 14,
+        marginLeft: 5,
+    },
+
+    confirmModalContent: {
+        backgroundColor: COLORS.card,
+        padding: 20,
+        borderRadius: 10,
+        width: '80%',
+        alignItems: 'center',
+    },
+    confirmModalText: {
+        fontSize: 16,
+        color: COLORS.text,
+        textAlign: 'center',
+        marginBottom: 20,
+    },
+    confirmModalButtons: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        width: '100%',
+    },
+    quantityContainer: {
+        marginTop: 30, // Espacio adicional entre botones y cantidad
     },
 });
 

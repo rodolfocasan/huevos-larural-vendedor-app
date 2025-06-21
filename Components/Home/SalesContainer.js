@@ -1,6 +1,7 @@
 // Components/Home/SalesContainer.js
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Modal, TextInput, FlatList, Alert } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 import SaleCalculator from './SaleCalculator';
 import TransactionsList from './TransactionsList';
@@ -13,7 +14,7 @@ import { COLORS, formatTime, formatDate, BILLS, EXPENSE_TYPES } from '../Utils/C
 
 
 // Componente para manejar la interfaz de ventas, historial y gastos
-const SalesContainer = ({ sale, updateSale, eggsPrice, locations, currentLocation, setCurrentLocation, addLocation }) => {
+const SalesContainer = ({ sale, updateSale, eggsPrice, locations, currentLocation, setCurrentLocation, addLocation, purchasePrice, showAnalysis }) => {
     const [activeTab, setActiveTab] = useState('sales'); // Estado para la pestaña activa: 'sales', 'history', 'expenses'
     const [expenseModalVisible, setExpenseModalVisible] = useState(false); // Estado para la visibilidad del modal de gastos
     const [expenseAmount, setExpenseAmount] = useState(''); // Estado para el monto del gasto
@@ -25,30 +26,39 @@ const SalesContainer = ({ sale, updateSale, eggsPrice, locations, currentLocatio
     // Verificación si la venta está cargada
     if (!sale) {
         return (
-            <View style={styles.container}>
+            <SafeAreaView style={styles.container} edges={['bottom']}>
                 <Text style={styles.loadingText}>Cargando ventas...</Text>
-            </View>
+            </SafeAreaView>
         );
     }
 
     // Calcular el fondo monetario total
     const calculateTotalFunds = () => {
-        // Total de ventas
-        const totalSales = sale.transactions.reduce((sum, transaction) => sum + transaction.total, 0);
+        // Total de ventas - validar cada transacción
+        const totalSales = sale.transactions.reduce((sum, transaction) => {
+            const amount = parseFloat(transaction.total);
+            return sum + (isNaN(amount) ? 0 : amount);
+        }, 0);
 
-        // Total de gastos
-        const totalExpenses = sale.expenses.reduce((sum, expense) => sum + expense.amount, 0);
+        // Total de gastos - validar cada gasto
+        const totalExpenses = sale.expenses.reduce((sum, expense) => {
+            const amount = parseFloat(expense.amount);
+            return sum + (isNaN(amount) ? 0 : amount);
+        }, 0);
 
-        // Total de ventas de ruta (clientes entregados)
+        // Total de ventas de ruta (clientes entregados) - validar cada cliente
         const totalRouteSales = (sale.clients || [])
             .filter(client => client.status === 'delivered')
-            .reduce((sum, client) => sum + (client.quantity * eggsPrice * 12), 0);
+            .reduce((sum, client) => {
+                const quantity = parseFloat(client.quantity);
+                const price = parseFloat(eggsPrice);
+                if (isNaN(quantity) || isNaN(price)) return sum;
+                return sum + (quantity * price * 12);
+            }, 0);
 
-        // Total de cambio dado (comentado, no borrar)
-        // const totalChange = sale.transactions.reduce((sum, transaction) => sum + transaction.change, 0);
-
-        // Fondo monetario total
-        return totalSales + totalRouteSales - totalExpenses;
+        // Fondo monetario total - redondear resultado final
+        const total = totalSales + totalRouteSales - totalExpenses;
+        return Math.round(total * 100) / 100;
     };
 
     // Función para mostrar el modal de confirmación mostrar los fondos
@@ -116,67 +126,67 @@ const SalesContainer = ({ sale, updateSale, eggsPrice, locations, currentLocatio
             visible={expenseModalVisible}
             onRequestClose={() => setExpenseModalVisible(false)}
         >
-            <TouchableOpacity
-                style={styles.modalOverlay}
-                activeOpacity={1}
-            >
-                <View style={styles.modalContent}>
-                    <Text style={styles.modalTitle}>Registrar Gasto</Text>
+            <SafeAreaView style={styles.modalOverlay} edges={['top', 'bottom']}>
+                <TouchableOpacity
+                    style={styles.modalOverlayTouchable}
+                    activeOpacity={1}
+                >
+                    <View style={styles.modalContent}>
+                        <Text style={styles.modalTitle}>Registrar Gasto</Text>
 
-                    <View style={styles.inputContainer}>
-                        <Text style={styles.inputLabel}>Monto ($):</Text>
-                        <TextInput
-                            style={styles.input}
-                            value={expenseAmount}
-                            onChangeText={setExpenseAmount}
-                            keyboardType="numeric"
-                            placeholder="0.00"
-                            placeholderTextColor={COLORS.textSecondary}
-                        />
-                    </View>
+                        <View style={styles.inputContainer}>
+                            <Text style={styles.inputLabel}>Monto ($):</Text>
+                            <TextInput
+                                style={styles.input}
+                                value={expenseAmount}
+                                onChangeText={setExpenseAmount}
+                                keyboardType="numeric"
+                                placeholder="0.00"
+                                placeholderTextColor={COLORS.textSecondary}
+                            />
+                        </View>
 
-                    <Text style={styles.inputLabel}>Descripción:</Text>
-                    <FlatList
-                        data={EXPENSE_TYPES}
-                        horizontal={false}
-                        keyExtractor={(item) => item}
-                        renderItem={({ item }) => (
-                            <TouchableOpacity
-                                style={[
-                                    styles.expenseTypeItem,
-                                    expenseDescription === item && styles.selectedExpenseType,
-                                ]}
-                                onPress={() => setExpenseDescription(item)}
-                            >
-                                <Text
+                        <Text style={styles.inputLabel}>Descripción:</Text>
+                        <ScrollView style={styles.expenseTypesContainer} showsVerticalScrollIndicator={false}>
+                            {EXPENSE_TYPES.map((item) => (
+                                <TouchableOpacity
+                                    key={item}
                                     style={[
-                                        styles.expenseTypeText,
-                                        expenseDescription === item && styles.selectedExpenseTypeText,
+                                        styles.expenseTypeItem,
+                                        expenseDescription === item && styles.selectedExpenseType,
                                     ]}
+                                    onPress={() => setExpenseDescription(item)}
                                 >
-                                    {item}
-                                </Text>
+                                    <Text
+                                        style={[
+                                            styles.expenseTypeText,
+                                            expenseDescription === item && styles.selectedExpenseTypeText,
+                                        ]}
+                                    >
+                                        {item}
+                                    </Text>
+                                </TouchableOpacity>
+                            ))}
+                        </ScrollView>
+
+                        <View style={styles.modalButtonsContainer}>
+                            <TouchableOpacity
+                                style={[styles.modalButton, styles.cancelButton]}
+                                onPress={() => setExpenseModalVisible(false)}
+                            >
+                                <Text style={styles.modalButtonText}>Cancelar</Text>
                             </TouchableOpacity>
-                        )}
-                    />
 
-                    <View style={styles.modalButtonsContainer}>
-                        <TouchableOpacity
-                            style={[styles.modalButton, styles.cancelButton]}
-                            onPress={() => setExpenseModalVisible(false)}
-                        >
-                            <Text style={styles.modalButtonText}>Cancelar</Text>
-                        </TouchableOpacity>
-
-                        <TouchableOpacity
-                            style={[styles.modalButton, styles.addButton]}
-                            onPress={addExpense}
-                        >
-                            <Text style={styles.modalButtonText}>Registrar</Text>
-                        </TouchableOpacity>
+                            <TouchableOpacity
+                                style={[styles.modalButton, styles.addButton]}
+                                onPress={addExpense}
+                            >
+                                <Text style={styles.modalButtonText}>Registrar</Text>
+                            </TouchableOpacity>
+                        </View>
                     </View>
-                </View>
-            </TouchableOpacity>
+                </TouchableOpacity>
+            </SafeAreaView>
         </Modal>
     );
 
@@ -188,86 +198,88 @@ const SalesContainer = ({ sale, updateSale, eggsPrice, locations, currentLocatio
             visible={newLocationModalVisible}
             onRequestClose={() => setNewLocationModalVisible(false)}
         >
-            <TouchableOpacity
-                style={styles.modalOverlay}
-                activeOpacity={1}
-                onPress={() => setNewLocationModalVisible(false)}
-            >
-                <View style={styles.modalContent}>
-                    <Text style={styles.modalTitle}>Ubicación de Venta</Text>
+            <SafeAreaView style={styles.modalOverlay} edges={['top', 'bottom']}>
+                <TouchableOpacity
+                    style={styles.modalOverlayTouchable}
+                    activeOpacity={1}
+                    onPress={() => setNewLocationModalVisible(false)}
+                >
+                    <View style={styles.modalContent}>
+                        <Text style={styles.modalTitle}>Ubicación de Venta</Text>
 
-                    {/* Lista de ubicaciones existentes */}
-                    <ScrollView style={styles.locationsList}>
-                        {locations.map((location, index) => (
+                        {/* Lista de ubicaciones existentes */}
+                        <ScrollView style={styles.locationsList} showsVerticalScrollIndicator={false}>
+                            {locations.map((location, index) => (
+                                <TouchableOpacity
+                                    key={index}
+                                    style={[
+                                        styles.locationItem,
+                                        currentLocation === location && styles.selectedLocationItem,
+                                    ]}
+                                    onPress={() => {
+                                        setCurrentLocation(location);
+                                        setNewLocationModalVisible(false);
+                                    }}
+                                >
+                                    <Text
+                                        style={[
+                                            styles.locationItemText,
+                                            currentLocation === location && styles.selectedLocationItemText,
+                                        ]}
+                                    >
+                                        {location}
+                                    </Text>
+                                </TouchableOpacity>
+                            ))}
+                        </ScrollView>
+
+                        {/* Campo para añadir nueva ubicación */}
+                        <View style={styles.inputContainer}>
+                            <Text style={styles.inputLabel}>Añadir nueva:</Text>
+                            <TextInput
+                                style={styles.input}
+                                value={newLocationName}
+                                onChangeText={setNewLocationName}
+                                placeholder="Nombre de ubicación"
+                                placeholderTextColor={COLORS.textSecondary}
+                            />
+                        </View>
+
+                        <View style={styles.modalButtonsContainer}>
                             <TouchableOpacity
-                                key={index}
+                                style={[styles.modalButton, styles.cancelButton]}
+                                onPress={() => setNewLocationModalVisible(false)}
+                            >
+                                <Text style={styles.modalButtonText}>Cancelar</Text>
+                            </TouchableOpacity>
+
+                            <TouchableOpacity
                                 style={[
-                                    styles.locationItem,
-                                    currentLocation === location && styles.selectedLocationItem,
+                                    styles.modalButton,
+                                    styles.addButton,
+                                    !newLocationName && styles.disabledButton,
                                 ]}
                                 onPress={() => {
-                                    setCurrentLocation(location);
-                                    setNewLocationModalVisible(false);
+                                    if (newLocationName) {
+                                        addLocation(newLocationName);
+                                        setCurrentLocation(newLocationName);
+                                        setNewLocationName('');
+                                        setNewLocationModalVisible(false);
+                                    }
                                 }}
+                                disabled={!newLocationName}
                             >
-                                <Text
-                                    style={[
-                                        styles.locationItemText,
-                                        currentLocation === location && styles.selectedLocationItemText,
-                                    ]}
-                                >
-                                    {location}
-                                </Text>
+                                <Text style={styles.modalButtonText}>Añadir</Text>
                             </TouchableOpacity>
-                        ))}
-                    </ScrollView>
-
-                    {/* Campo para añadir nueva ubicación */}
-                    <View style={styles.inputContainer}>
-                        <Text style={styles.inputLabel}>Añadir nueva:</Text>
-                        <TextInput
-                            style={styles.input}
-                            value={newLocationName}
-                            onChangeText={setNewLocationName}
-                            placeholder="Nombre de ubicación"
-                            placeholderTextColor={COLORS.textSecondary}
-                        />
+                        </View>
                     </View>
-
-                    <View style={styles.modalButtonsContainer}>
-                        <TouchableOpacity
-                            style={[styles.modalButton, styles.cancelButton]}
-                            onPress={() => setNewLocationModalVisible(false)}
-                        >
-                            <Text style={styles.modalButtonText}>Cancelar</Text>
-                        </TouchableOpacity>
-
-                        <TouchableOpacity
-                            style={[
-                                styles.modalButton,
-                                styles.addButton,
-                                !newLocationName && styles.disabledButton,
-                            ]}
-                            onPress={() => {
-                                if (newLocationName) {
-                                    addLocation(newLocationName);
-                                    setCurrentLocation(newLocationName);
-                                    setNewLocationName('');
-                                    setNewLocationModalVisible(false);
-                                }
-                            }}
-                            disabled={!newLocationName}
-                        >
-                            <Text style={styles.modalButtonText}>Añadir</Text>
-                        </TouchableOpacity>
-                    </View>
-                </View>
-            </TouchableOpacity>
+                </TouchableOpacity>
+            </SafeAreaView>
         </Modal>
     );
 
     return (
-        <View style={styles.container}>
+        <SafeAreaView style={styles.container} edges={['bottom']}>
             {/* Indicador de fondos totales */}
             <View style={styles.fundsContainer}>
                 <Text style={styles.fundsText}>
@@ -371,7 +383,12 @@ const SalesContainer = ({ sale, updateSale, eggsPrice, locations, currentLocatio
                 )}
 
                 {activeTab === 'history' && (
-                    <TransactionsList transactions={sale.transactions} sale={sale} />
+                    <TransactionsList
+                        transactions={sale.transactions}
+                        sale={sale}
+                        purchasePrice={purchasePrice}
+                        showAnalysis={showAnalysis}
+                    />
                 )}
 
                 {activeTab === 'expenses' && (
@@ -383,7 +400,11 @@ const SalesContainer = ({ sale, updateSale, eggsPrice, locations, currentLocatio
                             <Text style={styles.addExpenseButtonText}>(+) Gasto propio</Text>
                         </TouchableOpacity>
 
-                        <ScrollView style={styles.expensesList}>
+                        <ScrollView
+                            style={styles.expensesList}
+                            contentContainerStyle={styles.expensesListContent}
+                            showsVerticalScrollIndicator={false}
+                        >
                             {sale.expenses.length === 0 ? (
                                 <Text style={styles.noDataText}>No hay gastos registrados</Text>
                             ) : (
@@ -417,7 +438,7 @@ const SalesContainer = ({ sale, updateSale, eggsPrice, locations, currentLocatio
 
             {renderExpenseModal()}
             {renderLocationModal()}
-        </View>
+        </SafeAreaView>
     );
 };
 
@@ -495,6 +516,9 @@ const styles = StyleSheet.create({
     expensesList: {
         flex: 1,
     },
+    expensesListContent: {
+        paddingBottom: 20,
+    },
     expenseItem: {
         backgroundColor: COLORS.card,
         borderRadius: 5,
@@ -528,6 +552,7 @@ const styles = StyleSheet.create({
         padding: 15,
         borderRadius: 5,
         marginTop: 10,
+        marginBottom: 10,
     },
     totalLabel: {
         color: COLORS.text,
@@ -550,8 +575,15 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         alignItems: 'center',
     },
+    modalOverlayTouchable: {
+        flex: 1,
+        justifyContent: 'center',
+        alignItems: 'center',
+        width: '100%',
+    },
     modalContent: {
-        width: '80%',
+        width: '85%',
+        maxHeight: '80%',
         backgroundColor: COLORS.card,
         borderRadius: 10,
         padding: 20,
@@ -578,6 +610,10 @@ const styles = StyleSheet.create({
         paddingHorizontal: 10,
         paddingVertical: 8,
     },
+    expenseTypesContainer: {
+        maxHeight: 200,
+        marginBottom: 15,
+    },
     expenseTypeItem: {
         paddingVertical: 10,
         paddingHorizontal: 15,
@@ -596,7 +632,7 @@ const styles = StyleSheet.create({
     modalButtonsContainer: {
         flexDirection: 'row',
         justifyContent: 'space-between',
-        marginTop: 20,
+        marginTop: 10,
     },
     modalButton: {
         flex: 1,
@@ -611,6 +647,10 @@ const styles = StyleSheet.create({
     addButton: {
         backgroundColor: COLORS.success,
         marginLeft: 5,
+    },
+    disabledButton: {
+        backgroundColor: COLORS.textSecondary,
+        opacity: 0.6,
     },
     modalButtonText: {
         color: COLORS.text,

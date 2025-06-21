@@ -1,6 +1,7 @@
 // Components/Home/SaleCalculator.js
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, Modal, TextInput } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { COLORS, BILLS } from '../Utils/Constants';
 
@@ -20,6 +21,8 @@ const SaleCalculator = ({ onSaveTransaction, eggsPrice, currentLocation }) => {
     const [totalReceived, setTotalReceived] = useState(0); // Estado para el total de dinero recibido
     const [showCompositePayment, setShowCompositePayment] = useState(false); // Estado para el modal de pago compuesto
     const [compositeAmount, setCompositeAmount] = useState(''); // Estado para el monto del pago compuesto
+    const [showConfirmationModal, setShowConfirmationModal] = useState(false);
+    const [pendingTransaction, setPendingTransaction] = useState(null);
 
     // Si el usuario selecciona "Venta Dividida" y después vuelve a "Venta Completa", se necesita volver al estado correcto de saleType
     useEffect(() => {
@@ -48,11 +51,27 @@ const SaleCalculator = ({ onSaveTransaction, eggsPrice, currentLocation }) => {
     // Efecto para calcular el total recibido y el cambio
     useEffect(() => {
         const received = Object.entries(receivedMoney).reduce(
-            (sum, [bill, count]) => sum + parseInt(bill) * count,
+            (sum, [bill, count]) => {
+                const billValue = parseFloat(bill);
+                const billCount = parseInt(count);
+
+                // Validar que sean números válidos
+                if (isNaN(billValue) || isNaN(billCount) || billCount < 0) {
+                    return sum;
+                }
+
+                return sum + (billValue * billCount);
+            },
             0
         );
-        setTotalReceived(received);
-        setChange(received - total);
+
+        // Redondear para evitar errores de precisión
+        const roundedReceived = Math.round(received * 100) / 100;
+        const roundedTotal = Math.round(total * 100) / 100;
+        const calculatedChange = Math.round((roundedReceived - roundedTotal) * 100) / 100;
+
+        setTotalReceived(roundedReceived);
+        setChange(calculatedChange);
     }, [receivedMoney, total]);
 
     // Función para manejar el cambio de cantidad
@@ -85,9 +104,17 @@ const SaleCalculator = ({ onSaveTransaction, eggsPrice, currentLocation }) => {
 
     // Función para manejar el pago exacto
     const handleExactPayment = () => {
-        setReceivedMoney({});
-        setTotalReceived(total);
-        setChange(0);
+        // Validar que el total sea válido
+        if (isNaN(total) || !isFinite(total) || total <= 0) {
+            Alert.alert(
+                'Error',
+                'Error en el cálculo del total. Reinicie la calculadora.',
+                [{ text: 'OK' }]
+            );
+            return;
+        }
+
+        const roundedTotal = Math.round(total * 100) / 100;
 
         const transaction = {
             type: saleType,
@@ -97,70 +124,72 @@ const SaleCalculator = ({ onSaveTransaction, eggsPrice, currentLocation }) => {
                 : saleType === 'half_carton'
                     ? eggsPrice / 2
                     : eggsPrice * 12,
-            total,
-            receivedMoney: { [total]: 1 }, // Marcar como pago exacto
-            totalReceived: total,
+            total: roundedTotal,
+            receivedMoney: { [roundedTotal]: 1 },
+            totalReceived: roundedTotal,
             change: 0,
             location: currentLocation,
-            paymentType: 'exact', // Identificar como pago exacto
+            paymentType: 'exact',
         };
 
-        onSaveTransaction(transaction);
-        resetCalculator();
+        setPendingTransaction(transaction);
+        setShowConfirmationModal(true);
     };
 
     // Función para procesar el pago compuesto
     const handleCompositePayment = () => {
         const amount = parseFloat(compositeAmount);
-        if (isNaN(amount) || amount < total) {
+
+        // Validaciones más estrictas
+        if (isNaN(amount) || amount <= 0 || !isFinite(amount)) {
             Alert.alert(
                 'Error',
-                'El monto debe ser un número válido y mayor o igual al total de la venta.',
+                'El monto debe ser un número válido mayor a cero.',
                 [{ text: 'OK' }]
             );
             return;
         }
 
-        const calculatedChange = amount - total;
+        if (amount < total) {
+            Alert.alert(
+                'Error',
+                'El monto debe ser mayor o igual al total de la venta.',
+                [{ text: 'OK' }]
+            );
+            return;
+        }
 
-        Alert.alert(
-            'Confirmar Pago Compuesto',
-            `Total: $${total.toFixed(2)}\nRecibido: $${amount.toFixed(2)}\nCambio a dar: $${calculatedChange.toFixed(2)}`,
-            [
-                {
-                    text: "Cancelar",
-                    style: "cancel"
-                },
-                {
-                    text: "Confirmar",
-                    onPress: () => {
-                        const transaction = {
-                            type: saleType,
-                            quantity,
-                            unitPrice: saleType === 'carton'
-                                ? eggsPrice
-                                : saleType === 'half_carton'
-                                    ? eggsPrice / 2
-                                    : eggsPrice * 12,
-                            total,
-                            receivedMoney: { [amount]: 1 }, // Marcar el monto compuesto
-                            totalReceived: amount,
-                            change: calculatedChange,
-                            location: currentLocation,
-                            paymentType: 'composite', // Identificar como pago compuesto
-                        };
+        // Redondear a 2 decimales para evitar errores de precisión
+        const roundedAmount = Math.round(amount * 100) / 100;
+        const roundedTotal = Math.round(total * 100) / 100;
+        const calculatedChange = Math.round((roundedAmount - roundedTotal) * 100) / 100;
 
-                        onSaveTransaction(transaction);
-                        resetCalculator();
-                    }
-                }
-            ]
-        );
+        const transaction = {
+            type: saleType,
+            quantity,
+            unitPrice: saleType === 'carton'
+                ? eggsPrice
+                : saleType === 'half_carton'
+                    ? eggsPrice / 2
+                    : eggsPrice * 12,
+            total: roundedTotal,
+            receivedMoney: { [roundedAmount]: 1 },
+            totalReceived: roundedAmount,
+            change: calculatedChange,
+            location: currentLocation,
+            paymentType: 'composite',
+        };
+
+        setPendingTransaction(transaction);
+        setShowCompositePayment(false);
+        setCompositeAmount('');
+        setShowConfirmationModal(true);
     };
 
     // Función para confirmar la venta
     const confirmSale = () => {
-        if (change < 0) {
+        // Validar que change sea un número válido
+        if (isNaN(change) || !isFinite(change) || change < 0) {
             Alert.alert(
                 'Error',
                 'El monto recibido es menor que el total de la venta.',
@@ -169,6 +198,16 @@ const SaleCalculator = ({ onSaveTransaction, eggsPrice, currentLocation }) => {
             return;
         }
 
+        // Validar que totalReceived sea válido
+        if (isNaN(totalReceived) || !isFinite(totalReceived) || totalReceived < total) {
+            Alert.alert(
+                'Error',
+                'Error en el cálculo del pago. Verifique los montos ingresados.',
+                [{ text: 'OK' }]
+            );
+            return;
+        }
+
         const transaction = {
             type: saleType,
             quantity,
@@ -177,16 +216,125 @@ const SaleCalculator = ({ onSaveTransaction, eggsPrice, currentLocation }) => {
                 : saleType === 'half_carton'
                     ? eggsPrice / 2
                     : eggsPrice * 12,
-            total,
+            total: Math.round(total * 100) / 100,
             receivedMoney,
-            totalReceived,
-            change,
-            location: currentLocation, // Añadir la ubicación a la transacción
+            totalReceived: Math.round(totalReceived * 100) / 100,
+            change: Math.round(change * 100) / 100,
+            location: currentLocation,
         };
 
-        onSaveTransaction(transaction);
-        resetCalculator();
+        setPendingTransaction(transaction);
+        setShowConfirmationModal(true);
     };
+
+    // Función para confirmar la transacción desde el modal
+    const handleConfirmTransaction = () => {
+        if (pendingTransaction) {
+            onSaveTransaction(pendingTransaction);
+            resetCalculator();
+            setPendingTransaction(null);
+            setShowConfirmationModal(false);
+        }
+    };
+
+    // Función para cancelar la transacción desde el modal
+    const handleCancelTransaction = () => {
+        setPendingTransaction(null);
+        setShowConfirmationModal(false);
+    };
+
+    // Renderizado del modal de confirmación
+    const renderConfirmationModal = () => (
+        <Modal
+            animationType="slide"
+            transparent={true}
+            visible={showConfirmationModal}
+            onRequestClose={handleCancelTransaction}
+        >
+            <View style={styles.modalOverlay}>
+                <View style={styles.enhancedModalContent}>
+                    {/* Icono de confirmación */}
+                    <View style={styles.confirmationIconContainer}>
+                        <View style={styles.confirmationIcon}>
+                            <Text style={styles.confirmationIconText}>✓</Text>
+                        </View>
+                    </View>
+
+                    <Text style={styles.enhancedModalTitle}>Confirmar Venta</Text>
+                    <Text style={styles.enhancedModalSubtitle}>
+                        Revisa los detalles antes de proceder
+                    </Text>
+
+                    {/* Detalles de la venta */}
+                    <View style={styles.enhancedConfirmationDetails}>
+                        <View style={styles.saleDetailCard}>
+                            <Text style={styles.saleDetailTitle}>Resumen de Venta</Text>
+                            <View style={styles.saleDetailRow}>
+                                <Text style={styles.saleDetailLabel}>Tipo:</Text>
+                                <Text style={styles.saleDetailValue}>
+                                    {pendingTransaction?.type === 'carton' ? 'Cartones' :
+                                        pendingTransaction?.type === 'half_carton' ? 'Medios Cartones' : 'Cajas'}
+                                </Text>
+                            </View>
+                            <View style={styles.saleDetailRow}>
+                                <Text style={styles.saleDetailLabel}>Cantidad:</Text>
+                                <Text style={styles.saleDetailValue}>{pendingTransaction?.quantity}</Text>
+                            </View>
+                            <View style={styles.saleDetailRow}>
+                                <Text style={styles.saleDetailLabel}>Total:</Text>
+                                <Text style={styles.saleDetailTotalValue}>
+                                    ${pendingTransaction?.total.toFixed(2)}
+                                </Text>
+                            </View>
+                        </View>
+
+                        {/* Información de pago */}
+                        <View style={styles.paymentInfoCard}>
+                            <View style={styles.paymentInfoRow}>
+                                <View style={styles.paymentInfoItem}>
+                                    <Text style={styles.paymentInfoLabel}>💰 Recibido</Text>
+                                    <Text style={styles.paymentInfoValue}>
+                                        ${pendingTransaction?.totalReceived.toFixed(2)}
+                                    </Text>
+                                </View>
+                                <View style={styles.paymentInfoDivider} />
+                                <View style={styles.paymentInfoItem}>
+                                    <Text style={styles.paymentInfoLabel}>
+                                        {pendingTransaction?.change === 0 ? '✅ Exacto' : '💸 Cambio'}
+                                    </Text>
+                                    <Text style={[
+                                        styles.paymentInfoValue,
+                                        pendingTransaction?.change === 0 ? styles.exactPayment : styles.changeAmount
+                                    ]}>
+                                        ${pendingTransaction?.change.toFixed(2)}
+                                    </Text>
+                                </View>
+                            </View>
+                        </View>
+                    </View>
+
+                    {/* Botones mejorados */}
+                    <View style={styles.enhancedModalButtonsContainer}>
+                        <TouchableOpacity
+                            style={[styles.enhancedModalButton, styles.enhancedCancelButton]}
+                            onPress={handleCancelTransaction}
+                            activeOpacity={0.8}
+                        >
+                            <Text style={styles.enhancedCancelButtonText}>Cancelar</Text>
+                        </TouchableOpacity>
+
+                        <TouchableOpacity
+                            style={[styles.enhancedModalButton, styles.enhancedConfirmButton]}
+                            onPress={handleConfirmTransaction}
+                            activeOpacity={0.8}
+                        >
+                            <Text style={styles.enhancedConfirmButtonText}>Confirmar Venta</Text>
+                        </TouchableOpacity>
+                    </View>
+                </View>
+            </View>
+        </Modal>
+    );
 
     // Renderizado de la etapa de selección de cantidad
     const renderQuantityStep = () => (
@@ -439,10 +587,17 @@ const SaleCalculator = ({ onSaveTransaction, eggsPrice, currentLocation }) => {
     );
 
     return (
-        <ScrollView style={styles.container}>
-            {step === 'quantity' ? renderQuantityStep() : renderPaymentStep()}
-            {renderCompositePaymentModal()}
-        </ScrollView>
+        <SafeAreaView style={styles.safeContainer} edges={['bottom']}>
+            <ScrollView
+                style={styles.container}
+                contentContainerStyle={styles.scrollContainer}
+                showsVerticalScrollIndicator={false}
+            >
+                {step === 'quantity' ? renderQuantityStep() : renderPaymentStep()}
+                {renderCompositePaymentModal()}
+                {renderConfirmationModal()}
+            </ScrollView>
+        </SafeAreaView>
     );
 };
 
@@ -749,6 +904,179 @@ const styles = StyleSheet.create({
     modalButtonText: {
         color: COLORS.text,
         fontWeight: 'bold',
+    },
+    enhancedModalContent: {
+        width: '90%',
+        backgroundColor: COLORS.card,
+        borderRadius: 20,
+        padding: 25,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 10 },
+        shadowOpacity: 0.25,
+        shadowRadius: 25,
+        elevation: 10,
+    },
+    confirmationIconContainer: {
+        alignItems: 'center',
+        marginBottom: 15,
+    },
+    confirmationIcon: {
+        width: 60,
+        height: 60,
+        backgroundColor: COLORS.success,
+        borderRadius: 30,
+        alignItems: 'center',
+        justifyContent: 'center',
+        shadowColor: COLORS.success,
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.3,
+        shadowRadius: 8,
+        elevation: 6,
+    },
+    confirmationIconText: {
+        color: '#fff',
+        fontSize: 30,
+        fontWeight: 'bold',
+    },
+    enhancedModalTitle: {
+        fontSize: 24,
+        fontWeight: 'bold',
+        color: COLORS.text,
+        textAlign: 'center',
+        marginBottom: 5,
+    },
+    enhancedModalSubtitle: {
+        fontSize: 14,
+        color: COLORS.textSecondary,
+        textAlign: 'center',
+        marginBottom: 25,
+    },
+    enhancedConfirmationDetails: {
+        marginBottom: 25,
+    },
+    saleDetailCard: {
+        backgroundColor: COLORS.background,
+        borderRadius: 12,
+        padding: 16,
+        marginBottom: 15,
+        borderLeftWidth: 4,
+        borderLeftColor: COLORS.primary,
+    },
+    saleDetailTitle: {
+        fontSize: 16,
+        fontWeight: 'bold',
+        color: COLORS.text,
+        marginBottom: 12,
+    },
+    saleDetailRow: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: 8,
+    },
+    saleDetailLabel: {
+        fontSize: 14,
+        color: COLORS.textSecondary,
+        flex: 1,
+    },
+    saleDetailValue: {
+        fontSize: 14,
+        fontWeight: '600',
+        color: COLORS.text,
+        textAlign: 'right',
+    },
+    saleDetailTotalValue: {
+        fontSize: 16,
+        fontWeight: 'bold',
+        color: COLORS.primary,
+        textAlign: 'right',
+    },
+    paymentInfoCard: {
+        backgroundColor: COLORS.background,
+        borderRadius: 12,
+        padding: 16,
+        borderWidth: 1,
+        borderColor: COLORS.border,
+    },
+    paymentInfoRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+    },
+    paymentInfoItem: {
+        flex: 1,
+        alignItems: 'center',
+    },
+    paymentInfoDivider: {
+        width: 1,
+        height: 40,
+        backgroundColor: COLORS.border,
+        marginHorizontal: 15,
+    },
+    paymentInfoLabel: {
+        fontSize: 12,
+        color: COLORS.textSecondary,
+        marginBottom: 4,
+        textAlign: 'center',
+    },
+    paymentInfoValue: {
+        fontSize: 18,
+        fontWeight: 'bold',
+        color: COLORS.text,
+        textAlign: 'center',
+    },
+    exactPayment: {
+        color: COLORS.success,
+    },
+    changeAmount: {
+        color: COLORS.accent,
+    },
+    enhancedModalButtonsContainer: {
+        flexDirection: 'row',
+        gap: 12,
+    },
+    enhancedModalButton: {
+        flex: 1,
+        paddingVertical: 16,
+        borderRadius: 12,
+        alignItems: 'center',
+        justifyContent: 'center',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+        elevation: 3,
+    },
+    enhancedCancelButton: {
+        backgroundColor: '#f8f9fa',
+        borderWidth: 1,
+        borderColor: COLORS.error,
+    },
+    enhancedConfirmButton: {
+        backgroundColor: COLORS.success,
+    },
+    enhancedCancelButtonText: {
+        color: COLORS.error,
+        fontWeight: 'bold',
+        fontSize: 14,
+        textAlign: 'center',
+        lineHeight: 18,
+        flexWrap: 'wrap',
+    },
+    enhancedConfirmButtonText: {
+        color: '#fff',
+        fontWeight: 'bold',
+        fontSize: 14,
+        textAlign: 'center',
+        lineHeight: 18,
+        flexWrap: 'wrap',
+    },
+    safeContainer: {
+        flex: 1,
+        backgroundColor: COLORS.background,
+    },
+    scrollContainer: {
+        flexGrow: 1,
+        paddingBottom: 20,
     },
 });
 

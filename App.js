@@ -23,7 +23,7 @@ export default function App() {
     createdAt: new Date().toISOString(),
   });
 
-  // Estado para el precio por cartón de huevos, con un valor predeterminado de $4.00
+  // Estado para el precio por cartón de huevos, con un valor predeterminado
   const [eggsPrice, setEggsPrice] = useState(4);
 
   // Estado para la lista de ubicaciones de venta
@@ -31,6 +31,10 @@ export default function App() {
 
   // Estado para la ubicación de venta seleccionada actualmente
   const [currentLocation, setCurrentLocation] = useState('Bodega');
+
+  // Estados para parámetros de REV
+  const [purchasePrice, setPurchasePrice] = useState(2.50);
+  const [showAnalysis, setShowAnalysis] = useState(false);
 
 
 
@@ -162,8 +166,10 @@ export default function App() {
 
         // 2. Cargar datos con orden específico
         await loadEggsPrice();
+        await loadPurchasePrice();
+        await loadShowAnalysis();
         await loadLocations();
-        await loadSale(); // La venta al final porque es la más compleja
+        await loadSale();
 
         console.log('Aplicación inicializada correctamente');
       } catch (e) {
@@ -187,6 +193,52 @@ export default function App() {
   }, []);
 
 
+
+
+
+  // Función para cargar precio de compra
+  const loadPurchasePrice = async () => {
+    try {
+      const storedPrice = await AsyncStorage.getItem('@purchase_price');
+      if (storedPrice !== null) {
+        setPurchasePrice(parseFloat(storedPrice));
+      }
+    } catch (e) {
+      console.error('No se pudo cargar el precio de compra:', e);
+    }
+  };
+
+  // Función para guardar precio de compra
+  const savePurchasePrice = async (price) => {
+    try {
+      await AsyncStorage.setItem('@purchase_price', price.toString());
+      setPurchasePrice(price);
+    } catch (e) {
+      console.error('Error guardando el precio de compra:', e);
+    }
+  };
+
+  // Función para cargar estado del análisis
+  const loadShowAnalysis = async () => {
+    try {
+      const storedShow = await AsyncStorage.getItem('@show_analysis');
+      if (storedShow !== null) {
+        setShowAnalysis(JSON.parse(storedShow));
+      }
+    } catch (e) {
+      console.error('No se pudo cargar el estado del análisis:', e);
+    }
+  };
+
+  // Función para guardar estado del análisis
+  const saveShowAnalysis = async (show) => {
+    try {
+      await AsyncStorage.setItem('@show_analysis', JSON.stringify(show));
+      setShowAnalysis(show);
+    } catch (e) {
+      console.error('Error guardando el estado del análisis:', e);
+    }
+  };
 
   // Función asíncrona para cargar las ubicaciones de venta desde AsyncStorage
   const loadLocations = async () => {
@@ -470,6 +522,10 @@ export default function App() {
           <Header
             eggsPrice={eggsPrice}
             saveEggsPrice={saveEggsPrice}
+            purchasePrice={purchasePrice}
+            savePurchasePrice={savePurchasePrice}
+            showAnalysis={showAnalysis}
+            saveShowAnalysis={saveShowAnalysis}
           />
           <SalesContainer
             sale={sale}
@@ -479,6 +535,8 @@ export default function App() {
             currentLocation={currentLocation}
             setCurrentLocation={setCurrentLocation}
             addLocation={addLocation}
+            purchasePrice={purchasePrice}
+            showAnalysis={showAnalysis}
           />
         </View>
       </SafeAreaProvider>
