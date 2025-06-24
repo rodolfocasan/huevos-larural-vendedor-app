@@ -3,6 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { View, StatusBar, SafeAreaView, StyleSheet, Platform, Alert } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import 'react-native-get-random-values';
 
 import Header from './Components/Home/Header.js';
 import SalesContainer from './Components/Home/SalesContainer';
@@ -526,6 +527,8 @@ export default function App() {
             savePurchasePrice={savePurchasePrice}
             showAnalysis={showAnalysis}
             saveShowAnalysis={saveShowAnalysis}
+            sale={sale}
+            updateSale={updateSale}
           />
           <SalesContainer
             sale={sale}

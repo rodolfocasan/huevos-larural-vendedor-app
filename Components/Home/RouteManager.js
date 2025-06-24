@@ -127,6 +127,11 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
     };
 
     // Verificación si la venta está cargada
+    useEffect(() => {
+        console.log('Clientes actualizados en RouteManager:', sale.clients);
+    }, [sale.clients]);
+
+    // Verificación si la venta está cargada
     if (!sale) {
         return (
             <View style={styles.container}>
@@ -448,7 +453,7 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
             const { latitude, longitude } = location.coords;
             let address = `Coordenadas: ${latitude.toFixed(6)}, ${longitude.toFixed(6)}`;
 
-            // Solo intentar geocodificación si hay conexión y no estamos en modo offline
+            // Intentar geocodificación si hay conexión y no estamos en modo offline
             if (!isOfflineMode && isConnected) {
                 try {
                     const addressResponse = await Location.reverseGeocodeAsync({
@@ -471,15 +476,15 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
                     }
                 } catch (geocodeError) {
                     console.warn("Error en geocodificación:", geocodeError);
-                    // Mantener las coordenadas como dirección
+                    // Mantener las coordenadas como respaldo
                 }
             }
 
             setCurrentLocation({ latitude, longitude });
             setClientForm((prev) => ({
                 ...prev,
-                location: { latitude, longitude },
-                address: address,
+                location: { latitude, longitude }, // Coordenadas exactas siempre guardadas
+                address: address, // Dirección legible opcional
             }));
 
             Alert.alert("Éxito", "Ubicación obtenida correctamente");
@@ -852,6 +857,9 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
     };
 
     const isPhoneNumber = (contact) => {
+        if (typeof contact !== 'string') {
+            return false; // Si no es una cadena, no es un número de teléfono válido
+        }
         return /^[+]?[\d]+$/.test(contact.replace(/\s/g, ''));
     };
 

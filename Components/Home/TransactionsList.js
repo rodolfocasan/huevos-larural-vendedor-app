@@ -26,6 +26,10 @@ const TransactionsList = ({ transactions, sale, purchasePrice, showAnalysis }) =
         );
     }
 
+    // Estados para infinite scroll
+    const [displayedCount, setDisplayedCount] = React.useState(5);
+    const [isLoadingMore, setIsLoadingMore] = React.useState(false);
+
     // Calcular el total de ventas
     const totalSales = transactions.reduce((sum, transaction) => sum + transaction.total, 0);
     const [menuOpen, setMenuOpen] = React.useState(false);
@@ -34,6 +38,30 @@ const TransactionsList = ({ transactions, sale, purchasePrice, showAnalysis }) =
     const sortedTransactions = [...transactions].sort((a, b) => {
         return new Date(b.timestamp) - new Date(a.timestamp);
     });
+
+    // Transacciones a mostrar según el count actual
+    const visibleTransactions = sortedTransactions.slice(0, displayedCount);
+
+    // Función para cargar más transacciones
+    const loadMoreTransactions = () => {
+        if (displayedCount >= sortedTransactions.length || isLoadingMore) return;
+
+        setIsLoadingMore(true);
+        setTimeout(() => {
+            setDisplayedCount(prev => Math.min(prev + 3, sortedTransactions.length));
+            setIsLoadingMore(false);
+        }, 300);
+    };
+
+    // Función para detectar cuando se está cerca del final
+    const handleScroll = (event) => {
+        const { layoutMeasurement, contentOffset, contentSize } = event.nativeEvent;
+        const paddingToBottom = 20;
+
+        if (layoutMeasurement.height + contentOffset.y >= contentSize.height - paddingToBottom) {
+            loadMoreTransactions();
+        }
+    };
 
     // Función para calcular análisis de una transacción específica
     const calculateTransactionAnalysis = (transaction) => {
@@ -148,8 +176,12 @@ const TransactionsList = ({ transactions, sale, purchasePrice, showAnalysis }) =
                     )}
                 </View>
 
-                <ScrollView style={styles.transactionsList}>
-                    {sortedTransactions.map((transaction) => (
+                <ScrollView
+                    style={styles.transactionsList}
+                    onScroll={handleScroll}
+                    scrollEventThrottle={16}
+                >
+                    {visibleTransactions.map((transaction) => (
                         <View key={transaction.id} style={styles.transactionItem}>
                             <View style={styles.transactionHeader}>
                                 <Text style={styles.transactionType}>
@@ -300,6 +332,22 @@ const TransactionsList = ({ transactions, sale, purchasePrice, showAnalysis }) =
                             )}
                         </View>
                     ))}
+
+                    {/* Loader para cargar más transacciones */}
+                    {isLoadingMore && (
+                        <View style={styles.loaderContainer}>
+                            <Text style={styles.loaderText}>Cargando más transacciones...</Text>
+                        </View>
+                    )}
+
+                    {/* Mensaje cuando se han mostrado todas */}
+                    {displayedCount >= sortedTransactions.length && sortedTransactions.length > 5 && (
+                        <View style={styles.endContainer}>
+                            <Text style={styles.endText}>
+                                Todas las transacciones han sido cargadas ({sortedTransactions.length} total)
+                            </Text>
+                        </View>
+                    )}
                 </ScrollView>
 
                 <View style={styles.totalContainer}>
