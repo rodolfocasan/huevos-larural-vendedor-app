@@ -28,10 +28,10 @@ export default function App() {
   const [eggsPrice, setEggsPrice] = useState(4);
 
   // Estado para la lista de ubicaciones de venta
-  const [locations, setLocations] = useState(['Bodega']);
+  const [locations, setLocations] = useState(['Comercio Móvil']);
 
   // Estado para la ubicación de venta seleccionada actualmente
-  const [currentLocation, setCurrentLocation] = useState('Bodega');
+  const [currentLocation, setCurrentLocation] = useState('Comercio Móvil');
 
   // Estados para parámetros de REV
   const [purchasePrice, setPurchasePrice] = useState(2.50);
@@ -141,7 +141,7 @@ export default function App() {
       const storedLocations = await AsyncStorage.getItem('@locations');
       if (!storedLocations) {
         console.warn('Ubicaciones faltantes, restaurando valor por defecto...');
-        await AsyncStorage.setItem('@locations', JSON.stringify(['Bodega']));
+        await AsyncStorage.setItem('@locations', JSON.stringify(['Comercio Móvil']));
       }
 
       console.log('Verificación de integridad completada');
@@ -186,7 +186,7 @@ export default function App() {
 
         setSale(emergencySale);
         setEggsPrice(4.00);
-        setLocations(['Bodega']);
+        setLocations(['Comercio Móvil']);
       }
     };
 
@@ -516,34 +516,38 @@ export default function App() {
   };
 
   return (
-    <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
-      <StatusBar barStyle="light-content" backgroundColor={COLORS.primary} />
-      <SafeAreaProvider>
-        <View style={styles.contentContainer}>
-          <Header
-            eggsPrice={eggsPrice}
-            saveEggsPrice={saveEggsPrice}
-            purchasePrice={purchasePrice}
-            savePurchasePrice={savePurchasePrice}
-            showAnalysis={showAnalysis}
-            saveShowAnalysis={saveShowAnalysis}
-            sale={sale}
-            updateSale={updateSale}
-          />
-          <SalesContainer
-            sale={sale}
-            updateSale={updateSale}
-            eggsPrice={eggsPrice}
-            locations={locations}
-            currentLocation={currentLocation}
-            setCurrentLocation={setCurrentLocation}
-            addLocation={addLocation}
-            purchasePrice={purchasePrice}
-            showAnalysis={showAnalysis}
-          />
-        </View>
-      </SafeAreaProvider>
-    </SafeAreaView>
+    <SafeAreaProvider>
+      <View style={styles.container}>
+        <StatusBar barStyle="light-content" backgroundColor={COLORS.primary} />
+        <SafeAreaView style={styles.safeArea}>
+          <View style={styles.contentContainer}>
+            <Header
+              eggsPrice={eggsPrice}
+              saveEggsPrice={saveEggsPrice}
+              purchasePrice={purchasePrice}
+              savePurchasePrice={savePurchasePrice}
+              showAnalysis={showAnalysis}
+              saveShowAnalysis={saveShowAnalysis}
+              sale={sale}
+              updateSale={updateSale}
+            />
+            <View style={styles.salesContainer}>
+              <SalesContainer
+                sale={sale}
+                updateSale={updateSale}
+                eggsPrice={eggsPrice}
+                locations={locations}
+                currentLocation={currentLocation}
+                setCurrentLocation={setCurrentLocation}
+                addLocation={addLocation}
+                purchasePrice={purchasePrice}
+                showAnalysis={showAnalysis}
+              />
+            </View>
+          </View>
+        </SafeAreaView>
+      </View>
+    </SafeAreaProvider>
   );
 }
 
@@ -552,8 +556,14 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: COLORS.primary,
   },
+  safeArea: {
+    flex: 1,
+  },
   contentContainer: {
     flex: 1,
     backgroundColor: COLORS.background,
+  },
+  salesContainer: {
+    flex: 1,
   },
 });

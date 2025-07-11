@@ -188,8 +188,8 @@ const Header = ({ eggsPrice, saveEggsPrice, purchasePrice, savePurchasePrice, sh
     const convertToCSV = (data) => {
         if (!data || data.length === 0) return '';
 
-        // Definir el orden específico de las columnas
-        const orderedHeaders = ['id', 'name', 'contact', 'quantity', 'address', 'status', 'latitude', 'longitude', 'createdAt'];
+        // Definir el orden específico de las columnas, incluyendo groupName
+        const orderedHeaders = ['id', 'name', 'contact', 'quantity', 'address', 'status', 'latitude', 'longitude', 'createdAt', 'groupName'];
 
         // Crear la línea de encabezados
         const headers = orderedHeaders.join(',');
@@ -228,15 +228,21 @@ const Header = ({ eggsPrice, saveEggsPrice, purchasePrice, savePurchasePrice, sh
                 return;
             }
 
-            // Incluir todos los campos necesarios, incluyendo createdAt
+            // Obtener grupos
+            const groups = sale.clientGroups || [];
+
+            // Incluir todos los campos necesarios, incluyendo groupName
             const filteredClients = clients.map(({ photos, location, ...client }) => {
+                const group = groups.find(g => g.id === client.groupId);
                 return {
                     ...client,
-                    createdAt: client.createdAt || new Date().toISOString(), // Incluir fecha de registro
+                    createdAt: client.createdAt || new Date().toISOString(),
                     latitude: location ? location.latitude : null,
                     longitude: location ? location.longitude : null,
+                    groupName: group ? group.name : '',
                 };
             });
+
             const csvContent = convertToCSV(filteredClients);
             const fileName = `hlr_base_clientes_${getCurrentDate()}.csv`;
 
@@ -329,7 +335,7 @@ const Header = ({ eggsPrice, saveEggsPrice, purchasePrice, savePurchasePrice, sh
                 return obj;
             }, {});
 
-            // Formatear cliente con valores por defecto
+            // Formatear cliente con valores por defecto, incluyendo groupName
             const formattedClient = {
                 id: client.id || uuidv4(),
                 name: client.name || "Cliente Sin Nombre",
@@ -340,6 +346,7 @@ const Header = ({ eggsPrice, saveEggsPrice, purchasePrice, savePurchasePrice, sh
                 status: client.status || "pending",
                 photos: [],
                 createdAt: client.createdAt ? new Date(client.createdAt).toISOString() : new Date().toISOString(),
+                groupName: client.groupName || '', // Agregar groupName
             };
 
             // Reconstruir location si hay coordenadas válidas
@@ -467,7 +474,54 @@ const Header = ({ eggsPrice, saveEggsPrice, purchasePrice, savePurchasePrice, sh
     // Función auxiliar para procesar clientes válidos
     const processValidClients = (validClients) => {
         const existingClients = sale.clients || [];
-        const duplicates = findDuplicates(existingClients, validClients);
+        const existingGroups = sale.clientGroups || [];
+
+        // Crear un mapa de groupName a groupId
+        const groupNameToId = {};
+        existingGroups.forEach(group => {
+            groupNameToId[group.name] = group.id;
+        });
+
+        // Obtener todos los groupName de los clientes importados
+        const importedGroupNames = [...new Set(validClients.map(client => client.groupName).filter(Boolean))];
+
+        // Crear nuevos grupos para los groupName que no existan
+        const newGroups = importedGroupNames
+            .filter(groupName => !existingGroups.some(g => g.name === groupName))
+            .map((groupName, index) => ({
+                id: `group_${Date.now() + index}`,
+                name: groupName,
+                clients: [], // Se actualizará después
+            }));
+
+        // Combinar grupos existentes y nuevos
+        const allGroups = [...existingGroups, ...newGroups];
+
+        // Actualizar el mapa groupNameToId con los nuevos grupos
+        newGroups.forEach(group => {
+            groupNameToId[group.name] = group.id;
+        });
+
+        // Asignar groupId a cada cliente importado
+        const updatedClients = validClients.map(client => {
+            const groupId = client.groupName ? groupNameToId[client.groupName] : null;
+            return {
+                ...client,
+                groupId: groupId,
+            };
+        });
+
+        // Combinar clientes existentes y nuevos
+        const newClients = [...existingClients, ...updatedClients];
+
+        // Actualizar los grupos con los clientes
+        const updatedGroups = allGroups.map(group => ({
+            ...group,
+            clients: newClients.filter(client => client.groupId === group.id).map(client => client.id),
+        }));
+
+        // Detectar duplicados
+        const duplicates = findDuplicates(existingClients, updatedClients);
 
         if (duplicates.length > 0) {
             Alert.alert(
@@ -478,17 +532,26 @@ const Header = ({ eggsPrice, saveEggsPrice, purchasePrice, savePurchasePrice, sh
                     {
                         text: 'Sí',
                         onPress: () => {
-                            const newClients = [...existingClients, ...validClients];
-                            updateSale({ ...sale, clients: newClients });
-                            Alert.alert('Éxito', `Se han cargado ${validClients.length} clientes correctamente.`);
+                            const finalClients = [...existingClients, ...updatedClients];
+                            const finalSale = {
+                                ...sale,
+                                clients: finalClients,
+                                clientGroups: updatedGroups,
+                            };
+                            updateSale(finalSale);
+                            Alert.alert('Éxito', `Se han cargado ${updatedClients.length} clientes correctamente.`);
                         }
                     }
                 ]
             );
         } else {
-            const newClients = [...existingClients, ...validClients];
-            updateSale({ ...sale, clients: newClients });
-            Alert.alert('Éxito', `Se han cargado ${validClients.length} clientes correctamente.`);
+            const finalSale = {
+                ...sale,
+                clients: newClients,
+                clientGroups: updatedGroups,
+            };
+            updateSale(finalSale);
+            Alert.alert('Éxito', `Se han cargado ${updatedClients.length} clientes correctamente.`);
         }
     };
 

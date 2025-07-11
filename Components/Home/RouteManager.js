@@ -17,25 +17,20 @@ import {
 } from "react-native";
 import * as Location from "expo-location";
 import MapView, { Marker, Polyline, UrlTile } from 'react-native-maps';
-import * as FileSystem from 'expo-file-system';
 import { CameraView, CameraType, Camera } from 'expo-camera';
 import NetInfo from '@react-native-community/netinfo';
 import { FontAwesome, FontAwesome5, Ionicons, Feather } from '@expo/vector-icons';
 
-import { COLORS, formatTime, formatDate } from "../Utils/Constants";
+import { COLORS, formatTime, formatDate, ONLINE_TILE_URL } from "../Utils/Constants";
 
 
 
 
 
-// Constantes para la gestión de tiles
-const TILE_FOLDER = `${FileSystem.documentDirectory}tiles`;
-const ONLINE_TILE_URL = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
-const OFFLINE_TILE_URL = `file://${TILE_FOLDER}/{z}/{x}/{y}.png`;
-
-// Componente para gestionar la ruta de ventas y clientes
+// Dimensiones de la pantalla
 const { width, height } = Dimensions.get("window");
 
+// Componente para gestionar la ruta de ventas y clientes
 const RouteManager = ({ sale, updateSale, eggsPrice }) => {
     // Estados para la gestión de clientes
     const [activeClientTab, setActiveClientTab] = useState("confirmed"); // 'confirmed' o 'pending'
@@ -62,7 +57,7 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
     const [userLocation, setUserLocation] = useState(null);
     const [hasInitializedMapRegion, setHasInitializedMapRegion] = useState(false);
     const [isTrackingLocation, setIsTrackingLocation] = useState(false);
-    const [mapRef, setMapRef] = useState(null); // Agregar referencia al mapa
+    const [mapRef, setMapRef] = useState(null); // Referencia al mapa
 
     // Estados del formulario de cliente
     const [clientForm, setClientForm] = useState({
@@ -85,31 +80,170 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
     const [selectedImageIndex, setSelectedImageIndex] = useState(0);
     const [viewingImages, setViewingImages] = useState([]);
 
-    // Estados para la funcionalidad offline
-    const [isOfflineMode, setIsOfflineMode] = useState(false); // Controla el modo online/offline
-    const [isConnected, setIsConnected] = useState(true); // Estado de conectividad
+    // Estado para la conectividad
+    const [isConnected, setIsConnected] = useState(true); // Estado de conexión a internet
 
-    // Estados para la descarga offline
-    const [offlineDownloadModalVisible, setOfflineDownloadModalVisible] = useState(false);
-    const [isDownloading, setIsDownloading] = useState(false);
-    const [downloadProgress, setDownloadProgress] = useState(0);
-    const [downloadStatus, setDownloadStatus] = useState(''); // Estado textual
-    const [totalTiles, setTotalTiles] = useState(0);
-    const [downloadedTiles, setDownloadedTiles] = useState(0);
-
-    // Estados para el modal de confirmación de contacto en RUTA
+    // Estados para el modal de confirmación de contacto
     const [confirmModalVisible, setConfirmModalVisible] = useState(false);
     const [pendingAction, setPendingAction] = useState(null);
     const [actionService, setActionService] = useState('');
 
-    // Función para mostrar el modal de confirmación
+    // Estados para agrupación de clientes
+    const [selectedGroup, setSelectedGroup] = useState('todos'); // 'todos' o ID del grupo
+    const [groupModalVisible, setGroupModalVisible] = useState(false);
+    const [groupMethodModalVisible, setGroupMethodModalVisible] = useState(false);
+    const [editingGroupId, setEditingGroupId] = useState(null);
+    const [groupNameInput, setGroupNameInput] = useState('');
+    const [groupNameModalVisible, setGroupNameModalVisible] = useState(false);
+    const [changeGroupModalVisible, setChangeGroupModalVisible] = useState(false);
+    const [selectedClientForGroupChange, setSelectedClientForGroupChange] = useState(null);
+
+    // Función para mostrar el modal de confirmación de contacto
     const showConfirmModal = (action, service) => {
         setPendingAction(() => action);
         setActionService(service);
         setConfirmModalVisible(true);
     };
 
-    // Función para confirmar la acción
+    // Función para agrupar clientes por ubicación
+    const groupClientsByLocation = () => {
+        const clientsWithLocation = pendingClients.filter(client => client.location);
+        const groups = [];
+        const usedClients = new Set();
+
+        clientsWithLocation.forEach(client => {
+            if (usedClients.has(client.id)) return;
+
+            const group = {
+                id: `group_${groups.length + 1}`,
+                name: `Grupo ${groups.length + 1}`,
+                clients: [client.id]
+            };
+            usedClients.add(client.id);
+
+            // Buscar clientes cercanos (dentro de 1km aproximadamente)
+            clientsWithLocation.forEach(otherClient => {
+                if (usedClients.has(otherClient.id)) return;
+
+                const distance = getDistanceBetweenPoints(
+                    client.location.latitude,
+                    client.location.longitude,
+                    otherClient.location.latitude,
+                    otherClient.location.longitude
+                );
+
+                if (distance < 1000) { // 1km en metros
+                    group.clients.push(otherClient.id);
+                    usedClients.add(otherClient.id);
+                }
+            });
+
+            groups.push(group);
+        });
+
+        // Actualizar los clientes con sus grupos
+        const updatedClients = clients.map(client => {
+            const group = groups.find(g => g.clients.includes(client.id));
+            return {
+                ...client,
+                groupId: group ? group.id : null
+            };
+        });
+
+        // Guardar grupos en la venta
+        const updatedSale = {
+            ...sale,
+            clients: updatedClients,
+            clientGroups: groups
+        };
+
+        updateSale(updatedSale);
+        setGroupMethodModalVisible(false);
+    };
+
+    // Función para calcular la distancia entre dos puntos
+    const getDistanceBetweenPoints = (lat1, lon1, lat2, lon2) => {
+        const R = 6371e3; // Radio de la Tierra en metros
+        const φ1 = lat1 * Math.PI / 180;
+        const φ2 = lat2 * Math.PI / 180;
+        const Δφ = (lat2 - lat1) * Math.PI / 180;
+        const Δλ = (lon2 - lon1) * Math.PI / 180;
+
+        const a = Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
+            Math.cos(φ1) * Math.cos(φ2) *
+            Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+        return R * c; // Distancia en metros
+    };
+
+    // Función para cambiar el grupo de un cliente
+    const changeClientGroup = (clientId, groupId) => {
+        const updatedClients = clients.map(client => {
+            if (client.id === clientId) {
+                return {
+                    ...client,
+                    groupId: groupId
+                };
+            }
+            return client;
+        });
+
+        const updatedSale = {
+            ...sale,
+            clients: updatedClients
+        };
+
+        updateSale(updatedSale);
+    };
+
+    // Función para abrir el modal de cambio de grupo
+    const openChangeGroupModal = (client) => {
+        setSelectedClientForGroupChange(client);
+        setChangeGroupModalVisible(true);
+    };
+
+    // Función para manejar el cambio de grupo de un cliente
+    const handleChangeClientGroup = (groupId) => {
+        if (selectedClientForGroupChange) {
+            changeClientGroup(selectedClientForGroupChange.id, groupId);
+            setChangeGroupModalVisible(false);
+            setSelectedClientForGroupChange(null);
+        }
+    };
+
+    // Función para renombrar un grupo
+    const renameGroup = (groupId, newName) => {
+        const updatedGroups = (sale.clientGroups || []).map(group => {
+            if (group.id === groupId) {
+                return {
+                    ...group,
+                    name: newName
+                };
+            }
+            return group;
+        });
+
+        const updatedSale = {
+            ...sale,
+            clientGroups: updatedGroups
+        };
+
+        updateSale(updatedSale);
+    };
+
+    // Función para obtener clientes filtrados por grupo
+    const getFilteredClients = () => {
+        if (selectedGroup === 'todos') {
+            return currentClients;
+        }
+        return currentClients.filter(client => client.groupId === selectedGroup);
+    };
+
+    // Obtener grupos disponibles
+    const availableGroups = sale.clientGroups || [];
+
+    // Función para confirmar la acción de contacto
     const handleConfirmAction = () => {
         if (pendingAction) {
             pendingAction();
@@ -119,14 +253,14 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
         setActionService('');
     };
 
-    // Función para cancelar la acción
+    // Función para cancelar la acción de contacto
     const handleCancelAction = () => {
         setConfirmModalVisible(false);
         setPendingAction(null);
         setActionService('');
     };
 
-    // Verificación si la venta está cargada
+    // Efecto para verificar cambios en los clientes
     useEffect(() => {
         console.log('Clientes actualizados en RouteManager:', sale.clients);
     }, [sale.clients]);
@@ -142,21 +276,19 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
 
     // Inicializar clientes si no existen
     const clients = sale.clients || [];
-    const confirmedClients = clients.filter(
-        (client) => client.status === "confirmed"
-    );
-    const pendingClients = clients.filter(
-        (client) => client.status === "pending"
-    );
+    const confirmedClients = clients.filter(client => client.status === "confirmed");
+    const pendingClients = clients.filter(client => client.status === "pending");
+
+   // Inicializar clientes si no existen
+    const currentClients = (activeClientTab === 'confirmed' ? confirmedClients : pendingClients)
+        .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 
     // Función para solicitar permisos de cámara
     const requestCameraPermissions = async () => {
         try {
-            // Verificar el estado actual de los permisos
             const { status: existingStatus } = await Camera.getCameraPermissionsAsync();
             let finalStatus = existingStatus;
 
-            // Si no se han concedido, solicitar permisos
             if (existingStatus !== 'granted') {
                 const { status } = await Camera.requestCameraPermissionsAsync();
                 finalStatus = status;
@@ -167,10 +299,8 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
             if (finalStatus !== 'granted') {
                 Alert.alert(
                     'Permisos requeridos',
-                    'Se necesitan permisos de cámara para tomar fotos. Por favor, habilite los permisos en la configuración de su dispositivo.',
-                    [
-                        { text: 'OK', onPress: () => console.log('Permisos denegados') }
-                    ]
+                    'Se necesitan permisos de cámara para tomar fotos.',
+                    [{ text: 'OK' }]
                 );
             }
         } catch (error) {
@@ -179,7 +309,7 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
         }
     };
 
-    // Verificar GPS y solicitar permisos de ubicación al cargar el componente
+    // Verificar GPS, permisos y conectividad al cargar el componente
     useEffect(() => {
         checkGPSAndPermissions();
         requestCameraPermissions();
@@ -188,14 +318,12 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
         const unsubscribe = NetInfo.addEventListener(state => {
             const connected = state.isConnected && state.isInternetReachable;
             setIsConnected(connected);
-            setIsOfflineMode(!connected);
         });
 
         // Verificar conectividad inicial
         NetInfo.fetch().then(state => {
             const connected = state.isConnected && state.isInternetReachable;
             setIsConnected(connected);
-            setIsOfflineMode(!connected);
         });
 
         return () => unsubscribe();
@@ -218,7 +346,6 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
                             const { latitude, longitude } = location.coords;
                             setUserLocation({ latitude, longitude });
 
-                            // Actualizar región del mapa solo la primera vez
                             if (!hasInitializedMapRegion) {
                                 setMapRegion({
                                     latitude,
@@ -245,137 +372,16 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
         };
     }, [locationPermission, isTrackingLocation, hasInitializedMapRegion]);
 
-    // Función unificada para descargar tiles con progreso
-    const downloadTilesWithProgress = async () => {
-        // Verificar conectividad antes de descargar
-        if (!isConnected) {
-            Alert.alert("Error", "No hay conexión a internet. No se pueden descargar los mapas offline.");
-            return;
-        }
-
-        try {
-            setIsDownloading(true);
-            setDownloadProgress(0);
-            setDownloadedTiles(0);
-
-            // Calcular tiles necesarios
-            const currentZoom = calculateZoomLevel(mapRegion.longitudeDelta);
-            const minZoom = Math.max(10, currentZoom - 2); // Zoom mínimo 10
-            const maxZoom = Math.min(18, currentZoom + 2); // Zoom máximo 18
-            const tiles = getTileGrid(mapRegion, minZoom, maxZoom);
-
-            setTotalTiles(tiles.length);
-            setDownloadStatus(`Preparando descarga de ${tiles.length} tiles...`);
-
-            // Crear directorio principal si no existe
-            const dirInfo = await FileSystem.getInfoAsync(TILE_FOLDER);
-            if (!dirInfo.exists) {
-                await FileSystem.makeDirectoryAsync(TILE_FOLDER, { intermediates: true });
-            }
-
-            // Descargar tiles uno por uno
-            for (let i = 0; i < tiles.length; i++) {
-                const tile = tiles[i];
-                const progress = (i + 1) / tiles.length;
-
-                setDownloadStatus(`Descargando tile ${i + 1} de ${tiles.length}...`);
-                setDownloadProgress(progress);
-                setDownloadedTiles(i + 1);
-
-                try {
-                    await downloadSingleTile(tile);
-                } catch (tileError) {
-                    console.warn(`Error descargando tile ${tile.z}/${tile.x}/${tile.y}:`, tileError);
-                    // Continuar con el siguiente tile si uno falla
-                }
-            }
-
-            setDownloadStatus('¡Descarga completada exitosamente!');
-            setDownloadProgress(1);
-
-            // Esperar un momento para mostrar el mensaje de éxito
-            setTimeout(() => {
-                setIsDownloading(false);
-                setOfflineDownloadModalVisible(false);
-                Alert.alert('Éxito', 'Mapas offline descargados correctamente.');
-            }, 1500);
-
-        } catch (error) {
-            console.error('Error en descarga offline:', error);
-            setDownloadStatus('Error en la descarga');
-            setIsDownloading(false);
-            Alert.alert('Error', 'No se pudieron descargar los mapas offline.');
-        }
-    };
-
-    // Función para descargar un tile individual
-    const downloadSingleTile = async (tile) => {
-        const url = `https://tile.openstreetmap.org/${tile.z}/${tile.x}/${tile.y}.png`;
-        const dir = `${TILE_FOLDER}/${tile.z}/${tile.x}`;
-        const path = `${dir}/${tile.y}.png`;
-
-        // Crear directorio si no existe
-        const dirInfo = await FileSystem.getInfoAsync(dir);
-        if (!dirInfo.exists) {
-            await FileSystem.makeDirectoryAsync(dir, { intermediates: true });
-        }
-
-        // Verificar si el archivo ya existe
-        const fileInfo = await FileSystem.getInfoAsync(path);
-        if (fileInfo.exists) {
-            return; // Saltar si ya existe
-        }
-
-        // Descargar el tile
-        await FileSystem.downloadAsync(url, path);
-    };
-
-    // Convertir coordenadas de latitud/longitud a tiles
-    const latLonToTile = (lat, lon, zoom) => {
-        const latRad = lat * Math.PI / 180;
-        const n = Math.pow(2, zoom);
-        const x = Math.floor(((lon + 180) / 360) * n);
-        const y = Math.floor(((1 - Math.log(Math.tan(latRad) + (1 / Math.cos(latRad))) / Math.PI) / 2) * n);
-        return { x, y };
-    };
-
-    // Calcular nivel de zoom basado en longitudeDelta
-    const calculateZoomLevel = (longitudeDelta) => {
-        return Math.round(Math.log(360 / longitudeDelta) / Math.LN2);
-    };
-
-    // Obtener los tiles necesarios para una región
-    const getTileGrid = (region, minZoom, maxZoom) => {
-        const tiles = [];
-        const { latitude, longitude, latitudeDelta, longitudeDelta } = region;
-        const latMin = latitude - latitudeDelta / 2;
-        const latMax = latitude + latitudeDelta / 2;
-        const lonMin = longitude - longitudeDelta / 2;
-        const lonMax = longitude + longitudeDelta / 2;
-
-        for (let zoom = minZoom; zoom <= maxZoom; zoom++) {
-            const topLeft = latLonToTile(latMax, lonMin, zoom);
-            const bottomRight = latLonToTile(latMin, lonMax, zoom);
-            for (let x = topLeft.x; x <= bottomRight.x; x++) {
-                for (let y = topLeft.y; y <= bottomRight.y; y++) {
-                    tiles.push({ x, y, z: zoom });
-                }
-            }
-        }
-        return tiles;
-    };
-
-    // Función para verificar GPS y solicitar permisos de ubicación
+    // Función para verificar GPS y permisos de ubicación
     const checkGPSAndPermissions = async () => {
         try {
-            // Verificar si el GPS está habilitado
             const gpsStatus = await Location.hasServicesEnabledAsync();
             setGpsEnabled(gpsStatus);
 
             if (!gpsStatus) {
                 Alert.alert(
                     "GPS Deshabilitado",
-                    "Por favor, habilite el GPS en la configuración de su dispositivo para usar las funciones de ubicación.",
+                    "Por favor, habilite el GPS para usar las funciones de ubicación.",
                     [{ text: "OK" }]
                 );
                 return;
@@ -395,7 +401,7 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
         }
     };
 
-    // Función para mostrar el mapa con verificaciones
+    // Función para mostrar el mapa con verificaciones de GPS y conexión
     const showMapWithPermissions = async () => {
         if (!gpsEnabled) {
             Alert.alert(
@@ -411,16 +417,22 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
             if (!locationPermission) return;
         }
 
+        if (!isConnected) {
+            Alert.alert(
+                "Sin conexión",
+                "No hay conexión a internet. No se puede mostrar el mapa."
+            );
+            return;
+        }
+
         try {
             setIsTrackingLocation(true);
-            // Obtener ubicación inicial
             const location = await Location.getCurrentPositionAsync({
                 accuracy: Location.Accuracy.High,
             });
             const { latitude, longitude } = location.coords;
             setUserLocation({ latitude, longitude });
 
-            // Actualizar región del mapa con la ubicación actual
             const newRegion = {
                 latitude,
                 longitude,
@@ -436,7 +448,7 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
         }
     };
 
-    // Función para obtener la ubicación actual
+    // Función para obtener la ubicación actual del usuario
     const getCurrentLocation = async () => {
         if (!locationPermission) {
             Alert.alert("Error", "No se tienen permisos de ubicación");
@@ -447,14 +459,13 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
         try {
             const location = await Location.getCurrentPositionAsync({
                 accuracy: Location.Accuracy.High,
-                timeout: 15000, // Tiempo de espera más largo para GPS
+                timeout: 15000,
             });
 
             const { latitude, longitude } = location.coords;
             let address = `Coordenadas: ${latitude.toFixed(6)}, ${longitude.toFixed(6)}`;
 
-            // Intentar geocodificación si hay conexión y no estamos en modo offline
-            if (!isOfflineMode && isConnected) {
+            if (isConnected) {
                 try {
                     const addressResponse = await Location.reverseGeocodeAsync({
                         latitude,
@@ -476,31 +487,29 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
                     }
                 } catch (geocodeError) {
                     console.warn("Error en geocodificación:", geocodeError);
-                    // Mantener las coordenadas como respaldo
                 }
             }
 
             setCurrentLocation({ latitude, longitude });
             setClientForm((prev) => ({
                 ...prev,
-                location: { latitude, longitude }, // Coordenadas exactas siempre guardadas
-                address: address, // Dirección legible opcional
+                location: { latitude, longitude },
+                address: address,
             }));
 
             Alert.alert("Éxito", "Ubicación obtenida correctamente");
-
         } catch (error) {
             console.error("Error al obtener ubicación GPS:", error);
             Alert.alert(
                 "Error GPS",
-                "No se pudo obtener la ubicación. Verifique que:\n• El GPS esté habilitado\n• Tenga señal GPS (intente al aire libre)\n• Los permisos de ubicación estén activos"
+                "No se pudo obtener la ubicación. Verifique GPS y permisos."
             );
         } finally {
             setIsLoadingLocation(false);
         }
     };
 
-    // Función para resetear el formulario
+    // Función para resetear el formulario de cliente
     const resetForm = () => {
         setClientForm({
             name: "",
@@ -569,14 +578,11 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
     const validateQuantity = (quantity) => {
         const num = parseFloat(quantity);
         if (isNaN(num) || num <= 0) return false;
-
-        // Verificar que sea múltiplo de 0.5 (media caja)
         return (num * 2) % 1 === 0;
     };
 
     // Función para agregar un nuevo cliente
     const addClient = () => {
-        // Validaciones
         if (!clientForm.name.trim()) {
             Alert.alert("Error", "El nombre es requerido");
             return;
@@ -595,25 +601,20 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
             return;
         }
 
-        // Crear nuevo cliente
         const newClient = {
             id: Date.now().toString(),
             name: clientForm.name.trim(),
             contact: clientForm.contact.trim(),
             quantity: parseFloat(clientForm.quantity),
-            location: clientForm.location || null, // Ubicación opcional
+            location: clientForm.location || null,
             address: clientForm.address || "Ubicación no especificada",
             status: "pending",
             photos: clientForm.photos || [],
             createdAt: new Date().toISOString(),
         };
 
-        // Actualizar la venta con el nuevo cliente
         const updatedClients = [...clients, newClient];
-        const updatedSale = {
-            ...sale,
-            clients: updatedClients,
-        };
+        const updatedSale = { ...sale, clients: updatedClients };
 
         updateSale(updatedSale);
         setClientModalVisible(false);
@@ -622,27 +623,22 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
 
     // Función para cambiar el estado de un cliente
     const toggleClientStatus = (clientId) => {
-        const updatedClients = clients.map((client) => {
+        const updatedClients = clients.map(client => {
             if (client.id === clientId) {
                 return {
                     ...client,
                     status: client.status === "pending" ? "confirmed" : "pending",
-                    confirmedAt:
-                        client.status === "pending" ? new Date().toISOString() : null,
+                    confirmedAt: client.status === "pending" ? new Date().toISOString() : null,
                 };
             }
             return client;
         });
 
-        const updatedSale = {
-            ...sale,
-            clients: updatedClients,
-        };
-
+        const updatedSale = { ...sale, clients: updatedClients };
         updateSale(updatedSale);
     };
 
-    // Función para abrir modal de edición
+    // Función para abrir el modal de edición de cliente
     const openEditModal = (client) => {
         setEditingClient(client);
         setClientForm({
@@ -657,9 +653,8 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
         setEditModalVisible(true);
     };
 
-    // Función para actualizar cliente
+    // Función para actualizar un cliente existente
     const updateClient = () => {
-        // Validaciones
         if (!clientForm.name.trim()) {
             Alert.alert("Error", "El nombre es requerido");
             return;
@@ -678,15 +673,14 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
             return;
         }
 
-        // Actualizar cliente existente
-        const updatedClients = clients.map((client) => {
+        const updatedClients = clients.map(client => {
             if (client.id === editingClient.id) {
                 return {
                     ...client,
                     name: clientForm.name.trim(),
                     contact: clientForm.contact.trim(),
                     quantity: parseFloat(clientForm.quantity),
-                    location: clientForm.location || null, // Ubicación opcional
+                    location: clientForm.location || null,
                     address: clientForm.address || "Ubicación no especificada",
                     photos: clientForm.photos || [],
                     updatedAt: new Date().toISOString(),
@@ -695,11 +689,7 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
             return client;
         });
 
-        const updatedSale = {
-            ...sale,
-            clients: updatedClients,
-        };
-
+        const updatedSale = { ...sale, clients: updatedClients };
         updateSale(updatedSale);
         setEditModalVisible(false);
         setEditingClient(null);
@@ -710,20 +700,15 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
     const deleteClient = (clientId) => {
         Alert.alert(
             "Eliminar cliente permanentemente",
-            "⚠️ ADVERTENCIA: Está a punto de eliminar todos los datos y registros de este cliente para siempre. Esta acción no se puede deshacer.\n\n¿Está completamente seguro?",
+            "⚠️ Esta acción no se puede deshacer. ¿Está seguro?",
             [
                 { text: "Cancelar", style: "cancel" },
                 {
-                    text: "Eliminar para siempre",
+                    text: "Eliminar",
                     style: "destructive",
                     onPress: () => {
-                        const updatedClients = clients.filter(
-                            (client) => client.id !== clientId
-                        );
-                        const updatedSale = {
-                            ...sale,
-                            clients: updatedClients,
-                        };
+                        const updatedClients = clients.filter(client => client.id !== clientId);
+                        const updatedSale = { ...sale, clients: updatedClients };
                         updateSale(updatedSale);
                     },
                 },
@@ -731,11 +716,11 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
         );
     };
 
-    // Función para marcar pedido como entregado
+    // Función para marcar un pedido como entregado
     const markAsDelivered = (clientId) => {
         Alert.alert(
             "Confirmar entrega",
-            "Se registrará que el pedido ha sido entregado al cliente sin problemas y el cliente regresará a la sección de pendientes.",
+            "El pedido se registrará como entregado y regresará a pendientes.",
             [
                 { text: "Cancelar", style: "cancel" },
                 {
@@ -744,17 +729,14 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
                         const client = clients.find(c => c.id === clientId);
                         if (!client) return;
 
-                        // Calcular el total de la venta
-                        const total = client.quantity * eggsPrice * 12; // Suponiendo que una caja tiene 12 cartones
-
-                        // Crear una transacción para la venta de ruta
+                        const total = client.quantity * eggsPrice * 12; // Suponiendo 12 cartones por caja
                         const transaction = {
                             id: Date.now().toString(),
                             type: 'route',
                             quantity: client.quantity,
-                            unitPrice: eggsPrice * 12, // Precio por caja
+                            unitPrice: eggsPrice * 12,
                             total,
-                            receivedMoney: {}, // Asumimos pago exacto por simplicidad
+                            receivedMoney: {},
                             totalReceived: total,
                             change: 0,
                             location: client.address,
@@ -762,8 +744,7 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
                             timestamp: new Date().toISOString(),
                         };
 
-                        // Actualizar el cliente a pending (no eliminarlo)
-                        const updatedClients = clients.map((c) => {
+                        const updatedClients = clients.map(c => {
                             if (c.id === clientId) {
                                 return {
                                     ...c,
@@ -775,7 +756,6 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
                             return c;
                         });
 
-                        // Añadir la transacción a la venta
                         const updatedSale = {
                             ...sale,
                             clients: updatedClients,
@@ -789,18 +769,18 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
         );
     };
 
-    // Función para cancelar pedido confirmado
+    // Función para cancelar un pedido confirmado
     const cancelConfirmedOrder = (clientId) => {
         Alert.alert(
             "Cancelar pedido",
-            "El pedido ha sido cancelado por el cliente y regresará a la sección de pendientes.",
+            "El pedido se cancelará y regresará a pendientes.",
             [
                 { text: "Cancelar", style: "cancel" },
                 {
                     text: "Aceptar",
                     style: "destructive",
                     onPress: () => {
-                        const updatedClients = clients.map((client) => {
+                        const updatedClients = clients.map(client => {
                             if (client.id === clientId) {
                                 return {
                                     ...client,
@@ -811,10 +791,7 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
                             }
                             return client;
                         });
-                        const updatedSale = {
-                            ...sale,
-                            clients: updatedClients,
-                        };
+                        const updatedSale = { ...sale, clients: updatedClients };
                         updateSale(updatedSale);
                     },
                 },
@@ -834,17 +811,15 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
         }
     };
 
-    // Generar polyline para la ruta (líneas conectando ubicaciones)
+    // Generar coordenadas para la ruta (líneas entre ubicaciones)
     const generateRouteCoordinates = () => {
         const coordinates = [];
 
-        // Agregar ubicación del usuario si está disponible
         if (userLocation) {
             coordinates.push(userLocation);
         }
 
-        // Agregar ubicaciones de clientes confirmados
-        confirmedClients.forEach((client) => {
+        confirmedClients.forEach(client => {
             if (client.location) {
                 coordinates.push({
                     latitude: client.location.latitude,
@@ -856,14 +831,13 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
         return coordinates;
     };
 
+    // Verificar si el contacto es un número de teléfono
     const isPhoneNumber = (contact) => {
-        if (typeof contact !== 'string') {
-            return false; // Si no es una cadena, no es un número de teléfono válido
-        }
+        if (typeof contact !== 'string') return false;
         return /^[+]?[\d]+$/.test(contact.replace(/\s/g, ''));
     };
 
-    // Renderizar el modal de confirmación
+    // Renderizar el modal de confirmación de contacto
     const renderConfirmModal = () => (
         <Modal
             animationType="fade"
@@ -874,7 +848,7 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
             <View style={styles.modalOverlay}>
                 <View style={styles.confirmModalContent}>
                     <Text style={styles.confirmModalText}>
-                        Está a punto de salir de la aplicación para usar {actionService} con el cliente. ¿Desea continuar?
+                        Está a punto de usar {actionService} con el cliente. ¿Desea continuar?
                     </Text>
                     <View style={styles.confirmModalButtons}>
                         <TouchableOpacity
@@ -895,136 +869,198 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
         </Modal>
     );
 
-    // Modificar la función renderClientItem
-    const renderClientItem = (item, index) => (
-        <View key={item.id} style={styles.clientItem}>
-            <View style={styles.clientHeader}>
-                <Text style={styles.clientName}>{item.name}</Text>
-            </View>
+    // Renderizar cada item de cliente
+    const renderClientItem = (client, index) => {
+        const clientGroup = availableGroups.find(g => g.id === client.groupId);
 
-            <Text style={styles.clientContact}>📞 {item.contact}</Text>
-            {isPhoneNumber(item.contact) && (
-                <View style={styles.contactActions}>
-                    <TouchableOpacity
-                        style={[styles.contactButton, styles.phoneButton]}
-                        onPress={() => showConfirmModal(() => Linking.openURL(`tel:${item.contact}`), 'Teléfono')}
-                    >
-                        <Feather name="phone" size={24} color="white" />
-                        <Text style={styles.contactButtonText}>Llamar</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                        style={[styles.contactButton, styles.whatsappButton]}
-                        onPress={() => showConfirmModal(() => Linking.openURL(`whatsapp://send?phone=${item.contact}`), 'WhatsApp')}
-                    >
-                        <Ionicons name="logo-whatsapp" size={20} color="white" />
-                        <Text style={styles.contactButtonText}>WhatsApp</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                        style={[styles.contactButton, styles.telegramButton]}
-                        onPress={() => showConfirmModal(() => Linking.openURL(`tg://resolve?domain=${item.contact}`), 'Telegram')}
-                    >
-                        <FontAwesome5 name="telegram" size={24} color="white" />
-                        <Text style={styles.contactButtonText}>Telegram</Text>
-                    </TouchableOpacity>
+        return (
+            <View key={client.id} style={styles.clientItem}>
+                <View style={styles.clientHeader}>
+                    <Text style={styles.clientName}>{client.name}</Text>
+                    <Text style={styles.clientQuantity}>{client.quantity} cajas</Text>
                 </View>
-            )}
 
-            <View style={styles.quantityContainer}>
-                <Text style={styles.clientQuantity}>
-                    📦 {item.quantity} {item.quantity === 1 ? 'caja' : 'cajas'}
-                    (${(item.quantity * eggsPrice * 12).toFixed(2)})
-                </Text>
-            </View>
-            <Text style={styles.clientAddress}>📍 {item.address}</Text>
-
-            {/* Mostrar fotos de referencia */}
-            {item.photos && item.photos.length > 0 && (
-                <View style={styles.photosContainer}>
-                    <Text style={styles.photosLabel}>📷 Fotografías de referencia:</Text>
-                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.photosScrollView}>
-                        {item.photos.map((photo, photoIndex) => (
-                            <TouchableOpacity
-                                key={photoIndex}
-                                style={styles.photoThumbnail}
-                                onPress={() => openImageViewer(item.photos, photoIndex)}
-                            >
-                                <Image
-                                    source={{ uri: `data:image/jpeg;base64,${photo}` }}
-                                    style={styles.thumbnailImage}
-                                />
-                            </TouchableOpacity>
-                        ))}
-                    </ScrollView>
+                <View style={styles.clientDetails}>
+                    <Text style={styles.clientContact}>📞 {client.contact}</Text>
+                    <Text style={styles.clientAddress}>📍 {client.address}</Text>
+                    {client.createdAt && (
+                        <Text style={styles.clientDate}>
+                            📅 {formatDate(client.createdAt)} - {formatTime(client.createdAt)}
+                        </Text>
+                    )}
                 </View>
-            )}
 
-            <Text style={styles.clientDate}>
-                Registrado: {formatDate(item.createdAt)} {formatTime(item.createdAt)}
-            </Text>
-            {item.confirmedAt && (
-                <Text style={styles.clientConfirmedDate}>
-                    Confirmado: {formatDate(item.confirmedAt)} {formatTime(item.confirmedAt)}
-                </Text>
-            )}
+                {activeClientTab === "pending" && (
+                    <TouchableOpacity
+                        style={styles.groupBadge}
+                        onPress={() => openChangeGroupModal(client)}
+                    >
+                        <Text style={styles.groupBadgeText}>
+                            Grupo: {clientGroup?.name || "Sin agrupar"}
+                        </Text>
+                    </TouchableOpacity>
+                )}
 
-            {/* Botones según el estado del cliente */}
-            {item.status === 'pending' ? (
-                <View style={styles.clientActionsContainer}>
-                    <View style={styles.clientTopActions}>
+                {isPhoneNumber(client.contact) && (
+                    <View style={styles.contactActions}>
                         <TouchableOpacity
-                            style={styles.editButton}
-                            onPress={() => openEditModal(item)}
+                            style={[styles.contactButton, styles.phoneButton]}
+                            onPress={() => showConfirmModal(() => Linking.openURL(`tel:${client.contact}`), 'Teléfono')}
                         >
-                            <Text style={styles.editButtonText}>✏️ Editar información</Text>
+                            <Feather name="phone" size={24} color="white" />
+                            <Text style={styles.contactButtonText}>Llamar</Text>
                         </TouchableOpacity>
                         <TouchableOpacity
-                            style={styles.confirmButton}
-                            onPress={() => toggleClientStatus(item.id)}
+                            style={[styles.contactButton, styles.whatsappButton]}
+                            onPress={() => showConfirmModal(() => Linking.openURL(`whatsapp://send?phone=${client.contact}`), 'WhatsApp')}
                         >
-                            <Text style={styles.confirmButtonText}>🔃 El cliente confirmó</Text>
+                            <Ionicons name="logo-whatsapp" size={20} color="white" />
+                            <Text style={styles.contactButtonText}>WhatsApp</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                            style={[styles.contactButton, styles.telegramButton]}
+                            onPress={() => showConfirmModal(() => Linking.openURL(`tg://resolve?domain=${client.contact}`), 'Telegram')}
+                        >
+                            <FontAwesome5 name="telegram" size={24} color="white" />
+                            <Text style={styles.contactButtonText}>Telegram</Text>
                         </TouchableOpacity>
                     </View>
-                    <View style={styles.clientBottomActions}>
+                )}
+
+                <View style={styles.quantityContainer}>
+                    <Text style={styles.clientQuantity}>
+                        📦 {client.quantity} {client.quantity === 1 ? 'caja' : 'cajas'}
+                        (${(client.quantity * eggsPrice * 12).toFixed(2)})
+                    </Text>
+                </View>
+
+                {client.photos && client.photos.length > 0 && (
+                    <View style={styles.photosContainer}>
+                        <Text style={styles.photosLabel}>📷 Fotografías de referencia:</Text>
+                        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.photosScrollView}>
+                            {client.photos.map((photo, photoIndex) => (
+                                <TouchableOpacity
+                                    key={photoIndex}
+                                    style={styles.photoThumbnail}
+                                    onPress={() => openImageViewer(client.photos, photoIndex)}
+                                >
+                                    <Image
+                                        source={{ uri: `data:image/jpeg;base64,${photo}` }}
+                                        style={styles.thumbnailImage}
+                                    />
+                                </TouchableOpacity>
+                            ))}
+                        </ScrollView>
+                    </View>
+                )}
+
+                {client.confirmedAt && (
+                    <Text style={styles.clientConfirmedDate}>
+                        Confirmado: {formatDate(client.confirmedAt)} {formatTime(client.confirmedAt)}
+                    </Text>
+                )}
+
+                {client.status === 'pending' ? (
+                    <View style={styles.clientActionsContainer}>
+                        <View style={styles.clientTopActions}>
+                            <TouchableOpacity
+                                style={styles.editButton}
+                                onPress={() => openEditModal(client)}
+                            >
+                                <Text style={styles.editButtonText}>✏️ Editar información</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                                style={styles.confirmButton}
+                                onPress={() => toggleClientStatus(client.id)}
+                            >
+                                <Text style={styles.confirmButtonText}>🔃 El cliente confirmó</Text>
+                            </TouchableOpacity>
+                        </View>
+                        <View style={styles.clientBottomActions}>
+                            <TouchableOpacity
+                                style={styles.mapButton}
+                                onPress={() => handleViewOnMap(client)}
+                            >
+                                <Text style={styles.mapButtonText}>🗺️ Ver en el mapa</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                                style={styles.deleteButton}
+                                onPress={() => deleteClient(client.id)}
+                            >
+                                <Text style={styles.deleteButtonText}>🗑️ Eliminar cliente</Text>
+                            </TouchableOpacity>
+                        </View>
+                    </View>
+                ) : (
+                    <View style={styles.clientActionsContainer}>
+                        <View style={styles.clientTopActions}>
+                            <TouchableOpacity
+                                style={styles.deliveredButton}
+                                onPress={() => markAsDelivered(client.id)}
+                            >
+                                <Text style={styles.deliveredButtonText}>✅ Pedido entregado</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                                style={styles.cancelOrderButton}
+                                onPress={() => cancelConfirmedOrder(client.id)}
+                            >
+                                <Text style={styles.cancelOrderButtonText}>❌ Pedido cancelado</Text>
+                            </TouchableOpacity>
+                        </View>
                         <TouchableOpacity
                             style={styles.mapButton}
-                            onPress={() => centerMapOnClient(item)}
+                            onPress={() => handleViewOnMap(client)}
                         >
                             <Text style={styles.mapButtonText}>🗺️ Ver en el mapa</Text>
                         </TouchableOpacity>
-                        <TouchableOpacity
-                            style={styles.deleteButton}
-                            onPress={() => deleteClient(item.id)}
-                        >
-                            <Text style={styles.deleteButtonText}>🗑️ Eliminar cliente</Text>
-                        </TouchableOpacity>
                     </View>
-                </View>
-            ) : (
-                <View style={styles.clientActionsContainer}>
-                    <View style={styles.clientTopActions}>
-                        <TouchableOpacity
-                            style={styles.deliveredButton}
-                            onPress={() => markAsDelivered(item.id)}
-                        >
-                            <Text style={styles.deliveredButtonText}>✅ Pedido entregado</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                            style={styles.cancelOrderButton}
-                            onPress={() => cancelConfirmedOrder(item.id)}
-                        >
-                            <Text style={styles.cancelOrderButtonText}>❌ Pedido cancelado</Text>
-                        </TouchableOpacity>
-                    </View>
-                    <TouchableOpacity
-                        style={styles.mapButton}
-                        onPress={() => centerMapOnClient(item)}
-                    >
-                        <Text style={styles.mapButtonText}>🗺️ Ver en el mapa</Text>
-                    </TouchableOpacity>
-                </View>
-            )}
-        </View>
-    );
+                )}
+            </View>
+        );
+    };
+
+    // Función para manejar "Ver en el mapa" con verificación de conexión
+    const handleViewOnMap = (client) => {
+        if (!client.location) {
+            Alert.alert("Error", "Este cliente no tiene ubicación registrada");
+            return;
+        }
+
+        if (!isConnected) {
+            Alert.alert(
+                "Sin conexión",
+                "No hay conexión a internet. ¿Desea abrir la ubicación en Google Maps?",
+                [
+                    { text: "Cancelar", style: "cancel" },
+                    {
+                        text: "Abrir en Google Maps",
+                        onPress: () => {
+                            const url = `https://www.google.com/maps/search/?api=1&query=${client.location.latitude},${client.location.longitude}`;
+                            Linking.openURL(url);
+                        },
+                    },
+                ]
+            );
+            return;
+        }
+
+        if (!showMap) {
+            Alert.alert(
+                "Mapa desactivado",
+                "Active la vista de mapa con el botón 'Mostrar Mapa' para ver la ubicación."
+            );
+            return;
+        }
+
+        if (mapRef) {
+            mapRef.animateToRegion({
+                latitude: client.location.latitude,
+                longitude: client.location.longitude,
+                latitudeDelta: 0.005,
+                longitudeDelta: 0.005,
+            }, 1000);
+        }
+    };
 
     // Renderizar modal para agregar cliente
     const renderClientModal = () => (
@@ -1039,43 +1075,34 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
                     <ScrollView showsVerticalScrollIndicator={false}>
                         <Text style={styles.modalTitle}>Agregar Cliente</Text>
 
-                        {/* Campo nombre */}
                         <View style={styles.inputContainer}>
                             <Text style={styles.inputLabel}>Nombre de tienda/local:</Text>
                             <TextInput
                                 style={styles.input}
                                 value={clientForm.name}
-                                onChangeText={(text) =>
-                                    setClientForm((prev) => ({ ...prev, name: text }))
-                                }
+                                onChangeText={(text) => setClientForm(prev => ({ ...prev, name: text }))}
                                 placeholder="Tienda La Esperanza"
                                 placeholderTextColor={COLORS.textSecondary}
                             />
                         </View>
 
-                        {/* Campo contacto */}
                         <View style={styles.inputContainer}>
                             <Text style={styles.inputLabel}>Contacto (teléfono/email):</Text>
                             <TextInput
                                 style={styles.input}
                                 value={clientForm.contact}
-                                onChangeText={(text) =>
-                                    setClientForm((prev) => ({ ...prev, contact: text }))
-                                }
+                                onChangeText={(text) => setClientForm(prev => ({ ...prev, contact: text }))}
                                 placeholder="7123-4567 o email@ejemplo.com"
                                 placeholderTextColor={COLORS.textSecondary}
                             />
                         </View>
 
-                        {/* Campo cantidad */}
                         <View style={styles.inputContainer}>
                             <Text style={styles.inputLabel}>Cantidad (cajas):</Text>
                             <TextInput
                                 style={styles.input}
                                 value={clientForm.quantity}
-                                onChangeText={(text) =>
-                                    setClientForm((prev) => ({ ...prev, quantity: text }))
-                                }
+                                onChangeText={(text) => setClientForm(prev => ({ ...prev, quantity: text }))}
                                 keyboardType="numeric"
                                 placeholder="1.5 (una caja y media)"
                                 placeholderTextColor={COLORS.textSecondary}
@@ -1085,7 +1112,6 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
                             </Text>
                         </View>
 
-                        {/* Ubicación */}
                         <View style={styles.inputContainer}>
                             <Text style={styles.inputLabel}>Ubicación (opcional):</Text>
                             <View style={styles.locationOptionsContainer}>
@@ -1115,7 +1141,6 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
                             )}
                         </View>
 
-                        {/* Fotos de referencia */}
                         <View style={styles.inputContainer}>
                             <Text style={styles.inputLabel}>Fotos de referencia (opcional):</Text>
                             <View style={styles.photosInputContainer}>
@@ -1149,7 +1174,6 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
                             </Text>
                         </View>
 
-                        {/* Botones */}
                         <View style={styles.modalButtonsContainer}>
                             <TouchableOpacity
                                 style={[styles.modalButton, styles.cancelButton]}
@@ -1160,7 +1184,6 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
                             >
                                 <Text style={styles.modalButtonText}>Cancelar</Text>
                             </TouchableOpacity>
-
                             <TouchableOpacity
                                 style={[styles.modalButton, styles.addButton]}
                                 onPress={addClient}
@@ -1187,7 +1210,6 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
                     <ScrollView showsVerticalScrollIndicator={false}>
                         <Text style={styles.modalTitle}>Editar Cliente</Text>
 
-                        {/* Campo nombre */}
                         <View style={styles.inputContainer}>
                             <Text style={styles.inputLabel}>Nombre de tienda/local:</Text>
                             <TextInput
@@ -1199,7 +1221,6 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
                             />
                         </View>
 
-                        {/* Campo contacto */}
                         <View style={styles.inputContainer}>
                             <Text style={styles.inputLabel}>Contacto (teléfono/email):</Text>
                             <TextInput
@@ -1211,7 +1232,6 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
                             />
                         </View>
 
-                        {/* Campo cantidad */}
                         <View style={styles.inputContainer}>
                             <Text style={styles.inputLabel}>Cantidad (cajas):</Text>
                             <TextInput
@@ -1227,7 +1247,6 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
                             </Text>
                         </View>
 
-                        {/* Ubicación */}
                         <View style={styles.inputContainer}>
                             <Text style={styles.inputLabel}>Ubicación (opcional):</Text>
                             <View style={styles.locationOptionsContainer}>
@@ -1257,7 +1276,6 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
                             )}
                         </View>
 
-                        {/* Botones */}
                         <View style={styles.modalButtonsContainer}>
                             <TouchableOpacity
                                 style={[styles.modalButton, styles.cancelButton]}
@@ -1269,7 +1287,6 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
                             >
                                 <Text style={styles.modalButtonText}>Cancelar</Text>
                             </TouchableOpacity>
-
                             <TouchableOpacity
                                 style={[styles.modalButton, styles.addButton]}
                                 onPress={updateClient}
@@ -1283,198 +1300,127 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
         </Modal>
     );
 
-    // Renderizar modal de confirmación de descarga
-    const renderOfflineDownloadModal = () => (
+    // Renderizar modal de cámara
+    const renderCameraModal = () => (
         <Modal
             animationType="slide"
-            transparent={true}
-            visible={offlineDownloadModalVisible}
-            onRequestClose={() => !isDownloading && setOfflineDownloadModalVisible(false)}
+            transparent={false}
+            visible={cameraVisible}
+            onRequestClose={() => setCameraVisible(false)}
         >
-            <View style={styles.modalOverlay}>
-                <View style={styles.modalContent}>
-                    <Text style={styles.modalTitle}>Descargar Mapa para Uso Offline</Text>
-
-                    {!isDownloading ? (
-                        <>
-                            <Text style={styles.modalText}>
-                                Está a punto de descargar el mapa para uso offline. Esto ocupará espacio en el almacenamiento de su dispositivo.
-                            </Text>
-                            <View style={styles.modalButtonsContainer}>
-                                <TouchableOpacity
-                                    style={[styles.modalButton, styles.cancelButton]}
-                                    onPress={() => setOfflineDownloadModalVisible(false)}
-                                >
-                                    <Text style={styles.modalButtonText}>Cancelar</Text>
-                                </TouchableOpacity>
-                                <TouchableOpacity
-                                    style={[styles.modalButton, styles.addButton]}
-                                    onPress={downloadTilesWithProgress}
-                                >
-                                    <Text style={styles.modalButtonText}>Iniciar Descarga</Text>
-                                </TouchableOpacity>
-                            </View>
-                        </>
-                    ) : (
-                        <View style={styles.progressContainer}>
-                            <Text style={styles.progressText}>{downloadStatus}</Text>
-                            <Text style={styles.progressNumbers}>
-                                {downloadedTiles} / {totalTiles} tiles
-                            </Text>
-
-                            {/* Barra de progreso visual */}
-                            <View style={styles.progressBarContainer}>
-                                <View
-                                    style={[
-                                        styles.progressBarFill,
-                                        { width: `${Math.round(downloadProgress * 100)}%` }
-                                    ]}
-                                />
-                            </View>
-
-                            <Text style={styles.progressPercentage}>
-                                {Math.round(downloadProgress * 100)}%
-                            </Text>
-
-                            <ActivityIndicator
-                                size="large"
-                                color={COLORS.accent}
-                                style={styles.loadingIndicator}
-                            />
-                        </View>
-                    )}
+            <View style={styles.cameraContainer}>
+                <CameraView
+                    style={styles.camera}
+                    facing="back"
+                    ref={setCameraRef}
+                />
+                <View style={styles.cameraButtonsContainer}>
+                    <TouchableOpacity
+                        style={styles.closeCameraButton}
+                        onPress={() => setCameraVisible(false)}
+                    >
+                        <Text style={styles.closeCameraText}>✕</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                        style={styles.captureButton}
+                        onPress={takePicture}
+                    >
+                        <View style={styles.captureButtonInner} />
+                    </TouchableOpacity>
                 </View>
             </View>
         </Modal>
     );
 
-    // Renderizar modal de cámara
-    function renderCameraModal() {
-        return (
-            <Modal
-                animationType="slide"
-                transparent={false}
-                visible={cameraVisible}
-                onRequestClose={() => setCameraVisible(false)}
-            >
-                <View style={styles.cameraContainer}>
-                    <CameraView
-                        style={styles.camera}
-                        facing="back" // Cambiado de type a facing
-                        ref={setCameraRef}
-                    />
-                    <View style={styles.cameraButtonsContainer}>
-                        <TouchableOpacity
-                            style={styles.closeCameraButton}
-                            onPress={() => setCameraVisible(false)}
-                        >
-                            <Text style={styles.closeCameraText}>✕</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                            style={styles.captureButton}
-                            onPress={takePicture}
-                        >
-                            <View style={styles.captureButtonInner} />
-                        </TouchableOpacity>
-                    </View>
-                </View>
-            </Modal>
-        );
-    }
-
     // Renderizar modal de confirmación de foto
-    function renderPhotoConfirmModal() {
-        return (
-            <Modal
-                animationType="slide"
-                transparent={true}
-                visible={photoConfirmVisible}
-                onRequestClose={() => setPhotoConfirmVisible(false)}
-            >
-                <View style={styles.photoConfirmOverlay}>
-                    <View style={styles.photoConfirmContent}>
-                        {capturedPhoto && (
-                            <Image
-                                source={{ uri: `data:image/jpeg;base64,${capturedPhoto.base64}` }}
-                                style={styles.photoPreviewLarge}
-                            />
-                        )}
-                        <View style={styles.photoConfirmButtons}>
-                            <TouchableOpacity
-                                style={[styles.modalButton, styles.cancelButton]}
-                                onPress={retakePhoto}
-                            >
-                                <Text style={styles.modalButtonText}>Tomar de nuevo</Text>
-                            </TouchableOpacity>
-                            <TouchableOpacity
-                                style={[styles.modalButton, styles.addButton]}
-                                onPress={savePhoto}
-                            >
-                                <Text style={styles.modalButtonText}>Guardar</Text>
-                            </TouchableOpacity>
-                        </View>
+    const renderPhotoConfirmModal = () => (
+        <Modal
+            animationType="slide"
+            transparent={true}
+            visible={photoConfirmVisible}
+            onRequestClose={() => setPhotoConfirmVisible(false)}
+        >
+            <View style={styles.photoConfirmOverlay}>
+                <View style={styles.photoConfirmContent}>
+                    {capturedPhoto && (
+                        <Image
+                            source={{ uri: `data:image/jpeg;base64,${capturedPhoto.base64}` }}
+                            style={styles.photoPreviewLarge}
+                        />
+                    )}
+                    <View style={styles.photoConfirmButtons}>
+                        <TouchableOpacity
+                            style={[styles.modalButton, styles.cancelButton]}
+                            onPress={retakePhoto}
+                        >
+                            <Text style={styles.modalButtonText}>Tomar de nuevo</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                            style={[styles.modalButton, styles.addButton]}
+                            onPress={savePhoto}
+                        >
+                            <Text style={styles.modalButtonText}>Guardar</Text>
+                        </TouchableOpacity>
                     </View>
                 </View>
-            </Modal>
-        );
-    }
+            </View>
+        </Modal>
+    );
 
     // Renderizar visor de imágenes en pantalla completa
-    function renderImageViewer() {
-        return (
-            <Modal
-                animationType="fade"
-                transparent={true}
-                visible={imageViewerVisible}
-                onRequestClose={() => setImageViewerVisible(false)}
-            >
-                <View style={styles.imageViewerOverlay}>
-                    <TouchableOpacity
-                        style={styles.closeImageViewer}
-                        onPress={() => setImageViewerVisible(false)}
-                    >
-                        <Text style={styles.closeImageViewerText}>✕</Text>
-                    </TouchableOpacity>
+    const renderImageViewer = () => (
+        <Modal
+            animationType="fade"
+            transparent={true}
+            visible={imageViewerVisible}
+            onRequestClose={() => setImageViewerVisible(false)}
+        >
+            <View style={styles.imageViewerOverlay}>
+                <TouchableOpacity
+                    style={styles.closeImageViewer}
+                    onPress={() => setImageViewerVisible(false)}
+                >
+                    <Text style={styles.closeImageViewerText}>✕</Text>
+                </TouchableOpacity>
 
-                    <ScrollView
-                        horizontal
-                        pagingEnabled
-                        showsHorizontalScrollIndicator={false}
-                        onMomentumScrollEnd={(event) => {
-                            const index = Math.floor(event.nativeEvent.contentOffset.x / width);
-                            setSelectedImageIndex(index);
-                        }}
-                        contentOffset={{ x: selectedImageIndex * width, y: 0 }}
-                    >
-                        {viewingImages.map((image, index) => (
-                            <ScrollView
-                                key={index}
-                                style={styles.imageScrollView}
-                                minimumZoomScale={1}
-                                maximumZoomScale={3}
-                                showsVerticalScrollIndicator={false}
-                                showsHorizontalScrollIndicator={false}
-                            >
-                                <Image
-                                    source={{ uri: `data:image/jpeg;base64,${image}` }}
-                                    style={styles.fullScreenImage}
-                                    resizeMode="contain"
-                                />
-                            </ScrollView>
-                        ))}
-                    </ScrollView>
+                <ScrollView
+                    horizontal
+                    pagingEnabled
+                    showsHorizontalScrollIndicator={false}
+                    onMomentumScrollEnd={(event) => {
+                        const index = Math.floor(event.nativeEvent.contentOffset.x / width);
+                        setSelectedImageIndex(index);
+                    }}
+                    contentOffset={{ x: selectedImageIndex * width, y: 0 }}
+                >
+                    {viewingImages.map((image, index) => (
+                        <ScrollView
+                            key={index}
+                            style={styles.imageScrollView}
+                            minimumZoomScale={1}
+                            maximumZoomScale={3}
+                            showsVerticalScrollIndicator={false}
+                            showsHorizontalScrollIndicator={false}
+                        >
+                            <Image
+                                source={{ uri: `data:image/jpeg;base64,${image}` }}
+                                style={styles.fullScreenImage}
+                                resizeMode="contain"
+                            />
+                        </ScrollView>
+                    ))}
+                </ScrollView>
 
-                    {viewingImages.length > 1 && (
-                        <View style={styles.imageCounter}>
-                            <Text style={styles.imageCounterText}>
-                                {selectedImageIndex + 1} / {viewingImages.length}
-                            </Text>
-                        </View>
-                    )}
-                </View>
-            </Modal>
-        );
-    }
+                {viewingImages.length > 1 && (
+                    <View style={styles.imageCounter}>
+                        <Text style={styles.imageCounterText}>
+                            {selectedImageIndex + 1} / {viewingImages.length}
+                        </Text>
+                    </View>
+                )}
+            </View>
+        </Modal>
+    );
 
     // Renderizar modal de ubicación manual
     const renderManualLocationModal = () => (
@@ -1501,7 +1447,7 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
                             showsUserLocation={true}
                         >
                             <UrlTile
-                                urlTemplate={isOfflineMode ? OFFLINE_TILE_URL : ONLINE_TILE_URL}
+                                urlTemplate={ONLINE_TILE_URL}
                                 maximumZ={19}
                                 flipY={false}
                             />
@@ -1517,7 +1463,7 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
                                         if (isConnected) {
                                             setManualMapType('satellite');
                                         } else {
-                                            Alert.alert("Sin conexión", "El modo satélite requiere conexión a internet.");
+                                            Alert.alert("Sin conexión", "El modo satélite requiere internet.");
                                         }
                                     } else {
                                         setManualMapType('standard');
@@ -1537,7 +1483,7 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
                                 style={styles.markHereButton}
                                 onPress={async () => {
                                     let address = `Coordenadas: ${selectedLocation.latitude.toFixed(6)}, ${selectedLocation.longitude.toFixed(6)}`;
-                                    if (!isOfflineMode) {
+                                    if (isConnected) {
                                         try {
                                             const addressResponse = await Location.reverseGeocodeAsync(selectedLocation);
                                             if (addressResponse.length > 0) {
@@ -1577,35 +1523,254 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
         </Modal>
     );
 
-    // Función para centrar el mapa en un cliente específico
-    const centerMapOnClient = (client) => {
-        if (!showMap) {
-            Alert.alert(
-                "Mapa desactivado",
-                "Debe activar la vista de mapa presionando el botón 'Mostrar Mapa' para ver la ubicación del cliente."
-            );
-            return;
-        }
+    // Renderizar modal de selección de grupo
+    const renderGroupModal = () => (
+        <Modal
+            animationType="slide"
+            transparent={true}
+            visible={groupModalVisible}
+            onRequestClose={() => setGroupModalVisible(false)}
+        >
+            <View style={styles.modalOverlay}>
+                <View style={styles.modalContent}>
+                    <Text style={styles.modalTitle}>Seleccionar Grupo</Text>
+                    <ScrollView style={styles.groupList}>
+                        <TouchableOpacity
+                            style={[
+                                styles.groupItem,
+                                selectedGroup === 'todos' && styles.selectedGroupItem
+                            ]}
+                            onPress={() => {
+                                setSelectedGroup('todos');
+                                setGroupModalVisible(false);
+                            }}
+                        >
+                            <Ionicons name="list" size={20} color={selectedGroup === 'todos' ? COLORS.white : COLORS.text} />
+                            <Text style={[
+                                styles.groupItemText,
+                                selectedGroup === 'todos' && styles.selectedGroupItemText
+                            ]}>
+                                Todos los clientes
+                            </Text>
+                        </TouchableOpacity>
+                        {availableGroups.map(group => (
+                            <View key={group.id} style={styles.groupItemContainer}>
+                                <TouchableOpacity
+                                    style={[
+                                        styles.groupItem,
+                                        selectedGroup === group.id && styles.selectedGroupItem
+                                    ]}
+                                    onPress={() => {
+                                        setSelectedGroup(group.id);
+                                        setGroupModalVisible(false);
+                                    }}
+                                >
+                                    <Ionicons name="location" size={20} color={selectedGroup === group.id ? COLORS.white : COLORS.text} />
+                                    <Text style={[
+                                        styles.groupItemText,
+                                        selectedGroup === group.id && styles.selectedGroupItemText
+                                    ]}>
+                                        {group.name}
+                                    </Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity
+                                    style={styles.editGroupButton}
+                                    onPress={() => {
+                                        setEditingGroupId(group.id);
+                                        setGroupNameInput(group.name);
+                                        setGroupNameModalVisible(true);
+                                    }}
+                                >
+                                    <Ionicons name="pencil" size={20} color={COLORS.text} />
+                                </TouchableOpacity>
+                            </View>
+                        ))}
+                    </ScrollView>
+                    <TouchableOpacity
+                        style={styles.closeModalButton}
+                        onPress={() => setGroupModalVisible(false)}
+                    >
+                        <Text style={styles.closeModalButtonText}>Cerrar</Text>
+                    </TouchableOpacity>
+                </View>
+            </View>
+        </Modal>
+    );
 
-        if (!client.location) {
-            Alert.alert("Error", "Este cliente no tiene ubicación registrada");
-            return;
-        }
+    // Renderizar modal de método de agrupación
+    const renderGroupMethodModal = () => (
+        <Modal
+            animationType="slide"
+            transparent={true}
+            visible={groupMethodModalVisible}
+            onRequestClose={() => setGroupMethodModalVisible(false)}
+        >
+            <View style={styles.modalOverlay}>
+                <View style={styles.modalContent}>
+                    <Text style={styles.modalTitle}>Método de Agrupación</Text>
+                    <Text style={styles.modalSubtitle}>Seleccione cómo desea agrupar los clientes pendientes.</Text>
+                    <TouchableOpacity
+                        style={styles.groupMethodButton}
+                        onPress={groupClientsByLocation}
+                    >
+                        <Ionicons name="location-outline" size={24} color={COLORS.white} style={styles.groupMethodIcon} />
+                        <Text style={styles.groupMethodButtonText}>Agrupar por ubicación</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                        style={styles.closeModalButton}
+                        onPress={() => setGroupMethodModalVisible(false)}
+                    >
+                        <Text style={styles.closeModalButtonText}>Cancelar</Text>
+                    </TouchableOpacity>
+                </View>
+            </View>
+        </Modal>
+    );
 
-        if (mapRef) {
-            mapRef.animateToRegion({
-                latitude: client.location.latitude,
-                longitude: client.location.longitude,
-                latitudeDelta: 0.005,
-                longitudeDelta: 0.005,
-            }, 1000);
-        }
-    };
+    // Renderizar modal de edición de nombre de grupo
+    const renderGroupNameModal = () => (
+        <Modal
+            animationType="slide"
+            transparent={true}
+            visible={groupNameModalVisible}
+            onRequestClose={() => setGroupNameModalVisible(false)}
+        >
+            <View style={styles.modalOverlay}>
+                <View style={styles.modalContent}>
+                    <Text style={styles.modalTitle}>Editar nombre del grupo</Text>
+                    <TextInput
+                        style={styles.groupNameInput}
+                        value={groupNameInput}
+                        onChangeText={setGroupNameInput}
+                        placeholder="Nombre del grupo"
+                        maxLength={30}
+                    />
+                    <View style={styles.modalButtonsContainer}>
+                        <TouchableOpacity
+                            style={[styles.modalButton, styles.cancelButton]}
+                            onPress={() => {
+                                setGroupNameModalVisible(false);
+                                setEditingGroupId(null);
+                                setGroupNameInput('');
+                            }}
+                        >
+                            <Text style={styles.modalButtonText}>Cancelar</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                            style={[styles.modalButton, styles.addButton]}
+                            onPress={() => {
+                                if (groupNameInput.trim() && editingGroupId) {
+                                    renameGroup(editingGroupId, groupNameInput.trim());
+                                    setGroupNameModalVisible(false);
+                                    setEditingGroupId(null);
+                                    setGroupNameInput('');
+                                }
+                            }}
+                        >
+                            <Text style={styles.modalButtonText}>Guardar</Text>
+                        </TouchableOpacity>
+                    </View>
+                </View>
+            </View>
+        </Modal>
+    );
 
-    // Obtener la lista de clientes actual según la pestaña activa (ordenados del más reciente al más antiguo)
-    const currentClients = (activeClientTab === 'confirmed' ? confirmedClients : pendingClients)
-        .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    // Renderizar modal de cambio de grupo
+    const renderChangeGroupModal = () => (
+        <Modal
+            animationType="slide"
+            transparent={true}
+            visible={changeGroupModalVisible}
+            onRequestClose={() => setChangeGroupModalVisible(false)}
+        >
+            <View style={styles.modalOverlay}>
+                <View style={styles.modalContent}>
+                    <View style={styles.modalHeader}>
+                        <Text style={styles.modalTitle}>Cambiar Grupo</Text>
+                        <Text style={styles.modalSubtitle}>
+                            {selectedClientForGroupChange?.name}
+                        </Text>
+                    </View>
 
+                    <ScrollView style={styles.groupChangeList}>
+                        <TouchableOpacity
+                            style={[
+                                styles.groupChangeItem,
+                                !selectedClientForGroupChange?.groupId && styles.selectedGroupChangeItem
+                            ]}
+                            onPress={() => handleChangeClientGroup(null)}
+                        >
+                            <View style={styles.groupChangeItemContent}>
+                                <Text style={styles.groupChangeItemIcon}>🏷️</Text>
+                                <View style={styles.groupChangeItemTextContainer}>
+                                    <Text style={[
+                                        styles.groupChangeItemText,
+                                        !selectedClientForGroupChange?.groupId && styles.selectedGroupChangeItemText
+                                    ]}>
+                                        Sin grupo
+                                    </Text>
+                                    <Text style={styles.groupChangeItemDescription}>
+                                        Cliente individual
+                                    </Text>
+                                </View>
+                                {!selectedClientForGroupChange?.groupId && (
+                                    <Text style={styles.groupChangeItemCheck}>✓</Text>
+                                )}
+                            </View>
+                        </TouchableOpacity>
+
+                        {availableGroups.map(group => {
+                            const isSelected = selectedClientForGroupChange?.groupId === group.id;
+                            const clientsInGroup = clients.filter(c => c.groupId === group.id).length;
+
+                            return (
+                                <TouchableOpacity
+                                    key={group.id}
+                                    style={[
+                                        styles.groupChangeItem,
+                                        isSelected && styles.selectedGroupChangeItem
+                                    ]}
+                                    onPress={() => handleChangeClientGroup(group.id)}
+                                >
+                                    <View style={styles.groupChangeItemContent}>
+                                        <Text style={styles.groupChangeItemIcon}>📍</Text>
+                                        <View style={styles.groupChangeItemTextContainer}>
+                                            <Text style={[
+                                                styles.groupChangeItemText,
+                                                isSelected && styles.selectedGroupChangeItemText
+                                            ]}>
+                                                {group.name}
+                                            </Text>
+                                            <Text style={styles.groupChangeItemDescription}>
+                                                {clientsInGroup} cliente{clientsInGroup !== 1 ? 's' : ''}
+                                            </Text>
+                                        </View>
+                                        {isSelected && (
+                                            <Text style={styles.groupChangeItemCheck}>✓</Text>
+                                        )}
+                                    </View>
+                                </TouchableOpacity>
+                            );
+                        })}
+                    </ScrollView>
+
+                    <View style={styles.modalButtonsContainer}>
+                        <TouchableOpacity
+                            style={[styles.modalButton, styles.cancelButton]}
+                            onPress={() => {
+                                setChangeGroupModalVisible(false);
+                                setSelectedClientForGroupChange(null);
+                            }}
+                        >
+                            <Text style={styles.modalButtonText}>Cancelar</Text>
+                        </TouchableOpacity>
+                    </View>
+                </View>
+            </View>
+        </Modal>
+    );
+
+    // Renderizado principal del componente
     return (
         <View style={styles.container}>
             <ScrollView
@@ -1637,10 +1802,10 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
                 ) : (
                     <View style={styles.mapContainer}>
                         <MapView
-                            ref={(ref) => setMapRef(ref)}
+                            ref={setMapRef}
                             style={styles.map}
                             initialRegion={mapRegion}
-                            mapType={mapType} // Propiedad para cambiar el tipo de mapa
+                            mapType={mapType}
                             showsUserLocation={true}
                             showsMyLocationButton={false}
                             showsCompass={true}
@@ -1654,13 +1819,11 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
                             onError={(error) => console.error('Error en el mapa:', error)}
                             onRegionChangeComplete={setMapRegion}
                         >
-                            {/* Usamos UrlTile para cargar tiles online u offline */}
                             <UrlTile
-                                urlTemplate={isOfflineMode ? OFFLINE_TILE_URL : ONLINE_TILE_URL}
+                                urlTemplate={ONLINE_TILE_URL}
                                 maximumZ={19}
                                 flipY={false}
                             />
-
                             {userLocation && (
                                 <Marker
                                     coordinate={userLocation}
@@ -1668,7 +1831,6 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
                                     pinColor="blue"
                                 />
                             )}
-
                             {confirmedClients.filter(client => client.location).map(client => (
                                 <Marker
                                     key={`confirmed-${client.id}`}
@@ -1681,7 +1843,6 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
                                     pinColor="green"
                                 />
                             ))}
-
                             {pendingClients.filter(client => client.location).map(client => (
                                 <Marker
                                     key={`pending-${client.id}`}
@@ -1694,7 +1855,6 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
                                     pinColor="orange"
                                 />
                             ))}
-
                             {generateRouteCoordinates().length > 1 && (
                                 <Polyline
                                     coordinates={generateRouteCoordinates()}
@@ -1703,7 +1863,6 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
                                 />
                             )}
                         </MapView>
-
                         <View style={styles.mapButtonsContainer}>
                             <TouchableOpacity
                                 style={styles.mapActionButton}
@@ -1724,7 +1883,7 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
                                         if (isConnected) {
                                             setMapType('satellite');
                                         } else {
-                                            Alert.alert("Sin conexión", "El modo satélite requiere conexión a internet.");
+                                            Alert.alert("Sin conexión", "El modo satélite requiere internet.");
                                         }
                                     } else {
                                         setMapType('standard');
@@ -1739,39 +1898,6 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
                     </View>
                 )}
 
-                {/* Controles para el modo offline */}
-                {showMap && (
-                    <View style={styles.offlineControls}>
-                        <TouchableOpacity
-                            style={[styles.offlineButton, isOfflineMode && styles.offlineButtonActive]}
-                            onPress={() => {
-                                if (isConnected) {
-                                    setIsOfflineMode(!isOfflineMode);
-                                } else {
-                                    Alert.alert("Sin conexión", "No hay conexión a internet disponible.");
-                                }
-                            }}
-                        >
-                            <Text style={styles.offlineButtonText}>
-                                {isOfflineMode ? `📶 Modo Online ${!isConnected ? '(Sin conexión)' : ''}` : "📴 Modo Offline"}
-                            </Text>
-                        </TouchableOpacity>
-
-                        <TouchableOpacity
-                            style={[
-                                styles.downloadButton,
-                                (isDownloading || !isConnected) && styles.downloadButtonDisabled
-                            ]}
-                            onPress={() => setOfflineDownloadModalVisible(true)}
-                            disabled={isDownloading || !isConnected}
-                        >
-                            <Text style={styles.downloadButtonText}>
-                                {isDownloading ? "⏳ Descargando..." : !isConnected ? "❌ Sin conexión" : "💾 Descargar Mapa"}
-                            </Text>
-                        </TouchableOpacity>
-                    </View>
-                )}
-
                 <View style={styles.routeSummary}>
                     <Text style={styles.summaryTitle}>Resumen de Ruta</Text>
                     <View style={styles.summaryRow}>
@@ -1783,8 +1909,7 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
                         </Text>
                     </View>
                     <Text style={styles.summaryText}>
-                        Total cajas programadas:{" "}
-                        {confirmedClients.reduce((sum, client) => sum + client.quantity, 0)}
+                        Total cajas programadas: {confirmedClients.reduce((sum, client) => sum + client.quantity, 0)}
                     </Text>
                 </View>
 
@@ -1805,7 +1930,6 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
                             Confirmados ({confirmedClients.length})
                         </Text>
                     </TouchableOpacity>
-
                     <TouchableOpacity
                         style={[
                             styles.clientTab,
@@ -1831,30 +1955,71 @@ const RouteManager = ({ sale, updateSale, eggsPrice }) => {
                     <Text style={styles.addClientButtonText}>(+) Agregar Cliente</Text>
                 </TouchableOpacity>
 
+                {activeClientTab === "pending" && (
+                    <View style={styles.groupingSection}>
+                        <View style={styles.groupingHeader}>
+                            <TouchableOpacity
+                                style={styles.groupSelector}
+                                onPress={() => setGroupModalVisible(true)}
+                            >
+                                <Ionicons name="filter" size={20} color={COLORS.text} style={styles.groupSelectorIcon} />
+                                <Text style={styles.groupSelectorText}>
+                                    {selectedGroup === 'todos'
+                                        ? 'Todos los clientes'
+                                        : availableGroups.find(g => g.id === selectedGroup)?.name || 'Seleccionar grupo'
+                                    }
+                                </Text>
+                                <Ionicons name="chevron-down" size={20} color={COLORS.textSecondary} />
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                                style={styles.groupButton}
+                                onPress={() => setGroupMethodModalVisible(true)}
+                            >
+                                <Text style={styles.groupButtonText}>Agrupar clientes</Text>
+                            </TouchableOpacity>
+                        </View>
+                    </View>
+                )}
+
                 <View style={styles.clientsContainer}>
-                    {currentClients.length > 0 ? (
-                        currentClients.map((client, index) => renderClientItem(client, index))
+                    {activeClientTab === "pending" ? (
+                        getFilteredClients().length > 0 ? (
+                            getFilteredClients().map((client, index) => renderClientItem(client, index))
+                        ) : (
+                            <Text style={styles.noDataText}>
+                                {selectedGroup === 'todos'
+                                    ? "No hay clientes pendientes"
+                                    : "No hay clientes en este grupo"}
+                            </Text>
+                        )
                     ) : (
-                        <Text style={styles.noDataText}>
-                            No hay clientes{" "}
-                            {activeClientTab === "confirmed" ? "confirmados" : "pendientes"}
-                        </Text>
+                        currentClients.length > 0 ? (
+                            currentClients.map((client, index) => renderClientItem(client, index))
+                        ) : (
+                            <Text style={styles.noDataText}>
+                                No hay clientes confirmados
+                            </Text>
+                        )
                     )}
                 </View>
             </ScrollView>
 
             {renderClientModal()}
-            {renderEditModal()}
-            {renderOfflineDownloadModal()}
             {renderCameraModal()}
             {renderPhotoConfirmModal()}
             {renderImageViewer()}
             {renderManualLocationModal()}
+            {renderEditModal()}
             {renderConfirmModal()}
+            {renderGroupModal()}
+            {renderGroupMethodModal()}
+            {renderGroupNameModal()}
+            {renderChangeGroupModal()}
         </View>
     );
 };
 
+// Estilos del componente
 const styles = StyleSheet.create({
     container: {
         flex: 1,
@@ -1864,7 +2029,7 @@ const styles = StyleSheet.create({
         flex: 1,
     },
     scrollContent: {
-        paddingBottom: 20, // Espacio adicional al final para el scroll
+        paddingBottom: 20,
     },
     loadingText: {
         color: COLORS.text,
@@ -1873,7 +2038,7 @@ const styles = StyleSheet.create({
         fontSize: 16,
     },
     mapContainer: {
-        height: height * 0.4, // 40% de la altura de la pantalla
+        height: height * 0.4,
         marginBottom: 20,
         position: "relative",
     },
@@ -2192,7 +2357,7 @@ const styles = StyleSheet.create({
     },
     mapPlaceholder: {
         height: 200,
-        backgroundColor: COLORS.cardBackground,
+        backgroundColor: COLORS.card,
         margin: 15,
         borderRadius: 10,
         justifyContent: 'center',
@@ -2214,7 +2379,7 @@ const styles = StyleSheet.create({
         borderRadius: 8,
     },
     showMapButtonText: {
-        color: COLORS.textLight,
+        color: COLORS.text,
         fontSize: 16,
         fontWeight: 'bold',
     },
@@ -2250,113 +2415,6 @@ const styles = StyleSheet.create({
         fontSize: 18,
         fontWeight: 'bold',
     },
-    offlineDownloadButton: {
-        backgroundColor: COLORS.primary,
-        padding: 15,
-        marginHorizontal: 10,
-        borderRadius: 8,
-        alignItems: 'center',
-        marginBottom: 10,
-    },
-    offlineDownloadButtonText: {
-        color: COLORS.textLight,
-        fontSize: 16,
-        fontWeight: 'bold',
-    },
-    modalText: {
-        color: COLORS.text,
-        fontSize: 16,
-        marginBottom: 20,
-        textAlign: 'center',
-    },
-    progressBar: {
-        width: '100%',
-        height: 20,
-    },
-    progressContainer: {
-        alignItems: 'center',
-        paddingVertical: 20,
-    },
-    progressText: {
-        color: COLORS.text,
-        fontSize: 16,
-        textAlign: 'center',
-        marginBottom: 10,
-    },
-    progressNumbers: {
-        color: COLORS.textSecondary,
-        fontSize: 14,
-        marginBottom: 15,
-    },
-    progressBarContainer: {
-        width: '100%',
-        height: 8,
-        backgroundColor: COLORS.background,
-        borderRadius: 4,
-        marginBottom: 10,
-        overflow: 'hidden',
-    },
-    progressBarFill: {
-        height: '100%',
-        backgroundColor: COLORS.accent,
-        borderRadius: 4,
-    },
-    progressPercentage: {
-        color: COLORS.text,
-        fontSize: 18,
-        fontWeight: 'bold',
-        marginBottom: 15,
-    },
-    loadingIndicator: {
-        marginTop: 10,
-    },
-    offlineControls: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        paddingHorizontal: 15,
-        paddingVertical: 10,
-        backgroundColor: COLORS.card,
-        marginHorizontal: 10,
-        borderRadius: 8,
-        marginBottom: 10,
-        gap: 10,
-    },
-    offlineButton: {
-        flex: 1,
-        backgroundColor: COLORS.background,
-        paddingVertical: 12,
-        paddingHorizontal: 16,
-        borderRadius: 8,
-        alignItems: 'center',
-        borderWidth: 1,
-        borderColor: COLORS.border,
-    },
-    offlineButtonActive: {
-        backgroundColor: COLORS.accent,
-        borderColor: COLORS.accent,
-    },
-    offlineButtonText: {
-        color: COLORS.text,
-        fontSize: 14,
-        fontWeight: 'bold',
-    },
-    downloadButton: {
-        flex: 1,
-        backgroundColor: COLORS.secondary,
-        paddingVertical: 12,
-        paddingHorizontal: 16,
-        borderRadius: 8,
-        alignItems: 'center',
-    },
-    downloadButtonDisabled: {
-        backgroundColor: COLORS.textSecondary,
-        opacity: 0.6,
-    },
-    downloadButtonText: {
-        color: COLORS.text,
-        fontSize: 14,
-        fontWeight: 'bold',
-    },
     photosContainer: {
         marginVertical: 8,
     },
@@ -2376,10 +2434,7 @@ const styles = StyleSheet.create({
         width: 60,
         height: 60,
         borderRadius: 8,
-        backgroundColor: COLORS.lightGray,
     },
-
-    // Estilos para input de fotos
     photosInputContainer: {
         marginTop: 8,
     },
@@ -2391,7 +2446,6 @@ const styles = StyleSheet.create({
         width: 80,
         height: 80,
         borderRadius: 8,
-        backgroundColor: COLORS.lightGray,
     },
     removePhotoButton: {
         position: 'absolute',
@@ -2431,8 +2485,6 @@ const styles = StyleSheet.create({
         marginTop: 5,
         fontStyle: 'italic',
     },
-
-    // Estilos para cámara
     cameraContainer: {
         flex: 1,
         position: 'relative',
@@ -2493,8 +2545,6 @@ const styles = StyleSheet.create({
         justifyContent: 'space-around',
         width: '100%',
     },
-
-    // Estilos para visor de imágenes
     imageViewerOverlay: {
         flex: 1,
         backgroundColor: 'black',
@@ -2587,7 +2637,7 @@ const styles = StyleSheet.create({
         fontWeight: '600',
     },
     cancelManualButton: {
-        backgroundColor: COLORS.danger,
+        backgroundColor: COLORS.error,
         padding: 12,
         borderRadius: 8,
         flex: 1,
@@ -2631,20 +2681,19 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
     },
     phoneButton: {
-        backgroundColor: '#007AFF', // Color por defecto
+        backgroundColor: '#007AFF',
     },
     whatsappButton: {
-        backgroundColor: '#25D366', // Verde de WhatsApp
+        backgroundColor: '#25D366',
     },
     telegramButton: {
-        backgroundColor: '#0088cc', // Cyan de Telegram
+        backgroundColor: '#0088cc',
     },
     contactButtonText: {
         color: 'white',
         fontSize: 14,
         marginLeft: 5,
     },
-
     confirmModalContent: {
         backgroundColor: COLORS.card,
         padding: 20,
@@ -2664,7 +2713,193 @@ const styles = StyleSheet.create({
         width: '100%',
     },
     quantityContainer: {
-        marginTop: 30, // Espacio adicional entre botones y cantidad
+        marginTop: 30,
+    },
+    groupingSection: {
+        marginBottom: 16,
+        backgroundColor: COLORS.card,
+        borderRadius: 8,
+        padding: 12,
+    },
+    groupingHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        gap: 12,
+        flexWrap: 'wrap',
+        minHeight: 60,
+    },
+    groupSelector: {
+        flex: 1,
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: COLORS.background,
+        padding: 12,
+        borderRadius: 8,
+        borderWidth: 1,
+        borderColor: COLORS.border,
+    },
+    groupSelectorIcon: {
+        marginRight: 8,
+    },
+    groupSelectorText: {
+        color: COLORS.text,
+        fontSize: 16,
+        flex: 1,
+    },
+    groupButton: {
+        backgroundColor: COLORS.accent,
+        paddingHorizontal: 16,
+        paddingVertical: 10,
+        borderRadius: 6,
+        alignItems: 'center',
+        minWidth: 120,
+    },
+    groupButtonText: {
+        color: COLORS.white,
+        fontSize: 14,
+        fontWeight: 'bold',
+    },
+    groupList: {
+        maxHeight: 300,
+        marginVertical: 16,
+    },
+    groupItemContainer: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginBottom: 8,
+    },
+    groupItem: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        padding: 12,
+        borderRadius: 8,
+        backgroundColor: COLORS.background,
+        marginBottom: 8,
+    },
+    selectedGroupItem: {
+        backgroundColor: COLORS.accent,
+    },
+    groupItemText: {
+        color: COLORS.text,
+        fontSize: 16,
+        marginLeft: 8,
+    },
+    selectedGroupItemText: {
+        color: COLORS.white,
+    },
+    editGroupButton: {
+        marginLeft: 8,
+        padding: 8,
+    },
+    groupMethodButton: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: COLORS.primary,
+        padding: 16,
+        borderRadius: 8,
+        marginBottom: 12,
+    },
+    groupMethodIcon: {
+        marginRight: 12,
+    },
+    groupMethodButtonText: {
+        color: COLORS.white,
+        fontSize: 16,
+        fontWeight: 'bold',
+    },
+    groupNameInput: {
+        borderWidth: 1,
+        borderColor: COLORS.border,
+        borderRadius: 6,
+        padding: 12,
+        fontSize: 16,
+        backgroundColor: COLORS.background,
+        color: COLORS.text,
+        marginVertical: 16,
+    },
+    groupBadge: {
+        alignSelf: 'flex-start',
+        backgroundColor: COLORS.accent,
+        paddingHorizontal: 8,
+        paddingVertical: 4,
+        borderRadius: 4,
+        marginTop: 8,
+    },
+    groupBadgeText: {
+        color: COLORS.white,
+        fontSize: 12,
+        fontWeight: 'bold',
+    },
+    closeModalButton: {
+        backgroundColor: COLORS.textSecondary,
+        padding: 12,
+        borderRadius: 6,
+        alignItems: 'center',
+        marginTop: 16,
+    },
+    closeModalButtonText: {
+        color: COLORS.white,
+        fontSize: 14,
+        fontWeight: 'bold',
+    },
+    modalHeader: {
+        marginBottom: 20,
+        borderBottomWidth: 1,
+        borderBottomColor: COLORS.border,
+        paddingBottom: 15,
+    },
+    modalSubtitle: {
+        color: COLORS.textSecondary,
+        fontSize: 14,
+        textAlign: 'center',
+        marginBottom: 20,
+    },
+    groupChangeList: {
+        maxHeight: 300,
+        marginBottom: 20,
+    },
+    groupChangeItem: {
+        backgroundColor: COLORS.card,
+        borderRadius: 8,
+        marginBottom: 10,
+        borderWidth: 2,
+        borderColor: 'transparent',
+    },
+    selectedGroupChangeItem: {
+        borderColor: COLORS.accent,
+        backgroundColor: COLORS.accent + '20',
+    },
+    groupChangeItemContent: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        padding: 15,
+    },
+    groupChangeItemIcon: {
+        fontSize: 20,
+        marginRight: 15,
+    },
+    groupChangeItemTextContainer: {
+        flex: 1,
+    },
+    groupChangeItemText: {
+        fontSize: 16,
+        color: COLORS.text,
+        fontWeight: '500',
+    },
+    selectedGroupChangeItemText: {
+        color: COLORS.accent,
+        fontWeight: '600',
+    },
+    groupChangeItemDescription: {
+        fontSize: 12,
+        color: COLORS.textSecondary,
+        marginTop: 2,
+    },
+    groupChangeItemCheck: {
+        fontSize: 18,
+        color: COLORS.accent,
+        fontWeight: 'bold',
     },
 });
 
